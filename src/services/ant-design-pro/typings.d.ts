@@ -83,6 +83,30 @@ declare namespace API {
     type?: string;
   };
 
+  type RegisterParams = {
+    name: string;
+    email: string;
+    password: string;
+    code?: string;
+  };
+
+  type RegisterResult = {
+    code: number;
+    message: string;
+    data: null;
+  };
+
+  type SendCodeParams = {
+    email: string;
+    type: string;
+  };
+
+  type SendCodeResult = {
+    code: number;
+    message: string;
+    data: null;
+  };
+
   type ErrorResponse = {
     /** 业务约定的错误码 */
     errorCode: string;

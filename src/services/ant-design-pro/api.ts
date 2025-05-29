@@ -33,6 +33,30 @@ export async function login(body: API.LoginParams, options?: { [key: string]: an
   });
 }
 
+/** 注册接口 POST /api/register */
+export async function register(body: API.RegisterParams, options?: { [key: string]: any }) {
+  return request<API.RegisterResult>('/api/register', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
+/** 发送验证码接口 POST /api/send-verification-code */
+export async function sendVerificationCode(body: API.SendCodeParams, options?: { [key: string]: any }) {
+  return request<API.SendCodeResult>('/api/send-verification-code', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
 /** 此处后端没有提供注释 GET /api/notices */
 export async function getNotices(options?: { [key: string]: any }) {
   return request<API.NoticeIconList>('/api/notices', {
