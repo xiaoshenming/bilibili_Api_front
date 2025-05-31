@@ -322,11 +322,11 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
       ),
     },
     {
-      title: '文件大小',
-      dataIndex: 'file_size',
-      key: 'file_size',
+      title: '视频时长',
+      dataIndex: 'duration',
+      key: 'duration',
       width: 100,
-      render: (size) => <Text>{formatFileSize(size)}</Text>,
+      render: (duration) => <Text>{formatDuration(duration)}</Text>,
     },
     {
       title: '创建时间',

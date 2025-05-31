@@ -311,8 +311,8 @@ const VideoPlayer: React.FC = () => {
     const matchesQuality = qualityFilter === 'all' || video.quality.toString() === qualityFilter;
     
     const matchesDate = !dateRange || !video.pubdate || (
-      dayjs(video.pubdate).isAfter(dateRange[0]) &&
-      dayjs(video.pubdate).isBefore(dateRange[1])
+      dayjs(video.pubdate * 1000).isAfter(dateRange[0]) &&
+      dayjs(video.pubdate * 1000).isBefore(dateRange[1])
     );
     
     return matchesSearch && matchesStatus && matchesQuality && matchesDate;
@@ -369,11 +369,11 @@ const VideoPlayer: React.FC = () => {
       render: (quality) => getQualityTag(quality),
     },
     {
-      title: '文件大小',
-      dataIndex: 'file_size',
-      key: 'file_size',
+      title: '视频时长',
+      dataIndex: 'duration',
+      key: 'duration',
       width: 120,
-      render: (size) => size ? formatFileSize(size) : '-',
+      render: (duration) => duration ? formatDuration(duration) : '-',
     },
     {
       title: '状态',
@@ -387,7 +387,7 @@ const VideoPlayer: React.FC = () => {
       dataIndex: 'pubdate',
       key: 'pubdate',
       width: 150,
-      render: (date) => date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '-',
+      render: (date) => date ? dayjs(date * 1000).format('YYYY-MM-DD HH:mm') : '-',
     },
     {
       title: '操作',
@@ -617,7 +617,7 @@ const VideoPlayer: React.FC = () => {
                 <Descriptions.Item label="时长">{formatDuration(selectedVideo.duration)}</Descriptions.Item>
                 <Descriptions.Item label="播放量">{selectedVideo.view?.toLocaleString()}</Descriptions.Item>
                 <Descriptions.Item label="点赞数">{selectedVideo.like?.toLocaleString()}</Descriptions.Item>
-                <Descriptions.Item label="发布时间">{selectedVideo.pubdate ? dayjs(selectedVideo.pubdate).format('YYYY-MM-DD') : '-'}</Descriptions.Item>
+                <Descriptions.Item label="发布时间">{selectedVideo.pubdate ? dayjs(selectedVideo.pubdate * 1000).format('YYYY-MM-DD') : '-'}</Descriptions.Item>
                 <Descriptions.Item label="画质">{getQualityTag(selectedVideo.quality)}</Descriptions.Item>
               </Descriptions>
               {selectedVideo.description && (
@@ -690,7 +690,7 @@ const VideoPlayer: React.FC = () => {
               <Col span={12}>
                 <Title level={5}>时间信息</Title>
                 <Space direction="vertical" style={{ width: '100%' }}>
-                  <div><CalendarOutlined /> 发布时间: {selectedVideo.pubdate ? dayjs(selectedVideo.pubdate).format('YYYY-MM-DD HH:mm') : '-'}</div>
+                  <div><CalendarOutlined /> 发布时间: {selectedVideo.pubdate ? dayjs(selectedVideo.pubdate * 1000).format('YYYY-MM-DD HH:mm') : '-'}</div>
                   <div><CalendarOutlined /> 解析时间: {selectedVideo.created_at ? dayjs(selectedVideo.created_at).format('YYYY-MM-DD HH:mm') : '-'}</div>
                   <div><CalendarOutlined /> 更新时间: {selectedVideo.updated_at ? dayjs(selectedVideo.updated_at).format('YYYY-MM-DD HH:mm') : '-'}</div>
                 </Space>

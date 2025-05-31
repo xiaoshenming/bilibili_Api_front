@@ -457,7 +457,15 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
   };
 
   const formatDate = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleDateString('zh-CN');
+    // pubdate是以秒为单位的时间戳，需要转换为毫秒
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleDateString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   return (
