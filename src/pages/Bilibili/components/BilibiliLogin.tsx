@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Button, Spin, Alert, Row, Col, Typography, Space, Avatar, Tag } from 'antd';
 import { QrcodeOutlined, ReloadOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { useModel } from '@umijs/max';
+import { useModel, request } from '@umijs/max';
 
 const { Title, Text } = Typography;
 
@@ -48,15 +48,9 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
     setStatusMessage('正在生成二维码...');
 
     try {
-      const response = await fetch('/api/bilibili/generate-qrcode', {
+      const result = await request('/api/bilibili/generate-qrcode', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
       });
-
-      const result = await response.json();
       
       if (result.code === 200) {
         setQrCode(result.data.qrCodeImage);
@@ -80,13 +74,9 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
   const startPolling = (sessionId: string) => {
     const interval = setInterval(async () => {
       try {
-        const response = await fetch(`/api/bilibili/login-status/${sessionId}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          },
+        const result = await request(`/api/bilibili/login-status/${sessionId}`, {
+          method: 'GET',
         });
-
-        const result = await response.json();
         
         if (result.code === 200) {
           const { status: loginStatus, message: loginMessage } = result.data;

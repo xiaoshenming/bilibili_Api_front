@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { PageContainer } from '@ant-design/pro-components';
 import { Card, Tabs, message } from 'antd';
 import { VideoCameraOutlined, QrcodeOutlined } from '@ant-design/icons';
+import { useModel, request } from '@umijs/max';
 import BilibiliLogin from './components/BilibiliLogin';
 import VideoParser from './components/VideoParser';
 import AccountManager from './components/AccountManager';
-import { useModel } from '@umijs/max';
 
 const { TabPane } = Tabs;
 
@@ -27,12 +27,9 @@ const BilibiliPage: React.FC = () => {
 
   const fetchBilibiliAccounts = async () => {
     try {
-      const response = await fetch('/api/bilibili/accounts', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
+      const result = await request('/api/bilibili/accounts', {
+        method: 'GET',
       });
-      const result = await response.json();
       if (result.code === 200) {
         setBilibiliAccounts(result.data || []);
         // 如果有账号且当前在登录页面，自动切换到解析页面

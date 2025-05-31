@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Card, Row, Col, Avatar, Button, Space, Typography, Tag, Popconfirm, message, Modal, Alert } from 'antd';
 import { DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined, UserOutlined } from '@ant-design/icons';
+import { request } from '@umijs/max';
 
 const { Title, Text } = Typography;
 
@@ -25,16 +26,10 @@ const AccountManager: React.FC<AccountManagerProps> = ({ accounts, onAccountChan
     setLoading(accountId);
     
     try {
-      const response = await fetch(`/api/bilibili/accounts/${accountId}/toggle`, {
+      const result = await request(`/api/bilibili/accounts/${accountId}/toggle`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({ isActive: !isActive }),
+        data: { isActive: !isActive },
       });
-
-      const result = await response.json();
       
       if (result.code === 200) {
         message.success(isActive ? '账号已停用' : '账号已激活');
@@ -54,14 +49,9 @@ const AccountManager: React.FC<AccountManagerProps> = ({ accounts, onAccountChan
     setLoading(accountId);
     
     try {
-      const response = await fetch(`/api/bilibili/accounts/${accountId}`, {
+      const result = await request(`/api/bilibili/accounts/${accountId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
       });
-
-      const result = await response.json();
       
       if (result.code === 200) {
         message.success('账号删除成功');

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Card, Input, Button, Row, Col, Typography, Space, Alert, Spin, Image, Tag, Descriptions, message, Modal } from 'antd';
 import { SearchOutlined, DownloadOutlined, PlayCircleOutlined, EyeOutlined, LikeOutlined, ShareAltOutlined } from '@ant-design/icons';
 import { CopyToClipboard } from 'react-copy-to-clipboard';
+import { request } from '@umijs/max';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -66,13 +67,9 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
     setVideoInfo(null);
 
     try {
-      const response = await fetch(`/api/bilibili/parse-videos?input=${encodeURIComponent(inputUrl)}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
+      const result = await request(`/api/bilibili/parse-videos?input=${encodeURIComponent(inputUrl)}`, {
+        method: 'GET',
       });
-
-      const result = await response.json();
       
       if (result.code === 200) {
         setVideoInfo(result.data);
@@ -93,16 +90,12 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
 
     setLoading(true);
     try {
-      const response = await fetch(
+      const result = await request(
         `/api/bilibili/download?bvid=${videoInfo.bvid}&cid=${videoInfo.cid}&quality=80`,
         {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          },
+          method: 'GET',
         }
       );
-
-      const result = await response.json();
       
       if (result.code === 200) {
         setDownloadUrls({
