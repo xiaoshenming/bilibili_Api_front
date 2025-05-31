@@ -203,14 +203,8 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
             setCurrentStep(3);
             setLoginProgress(100);
             
-            // 记录登录历史
-            await recordLoginHistory({
-              accountId: result.data.userInfo?.mid || '',
-              nickname: result.data.userInfo?.uname || '未知用户',
-              avatar: result.data.userInfo?.face || '',
-              loginMethod: 'qrcode',
-              status: 'success'
-            });
+            // 登录成功，可以在这里添加其他处理逻辑
+            console.log('用户登录成功:', result.data.userInfo);
             
             // 停止轮询
             if (pollingRef.current) {
@@ -237,14 +231,8 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
             message.success('登录成功！');
             onLoginSuccess();
           } else if (loginStatus === 'expired' || loginStatus === 'error') {
-            // 记录失败历史
-            await recordLoginHistory({
-              accountId: '',
-              nickname: '未知用户',
-              avatar: '',
-              loginMethod: 'qrcode',
-              status: loginStatus === 'expired' ? 'expired' : 'failed'
-            });
+            // 登录失败或过期
+            console.log('登录失败或过期:', loginStatus, loginMessage);
             
             // 停止轮询
             if (pollingRef.current) {
@@ -278,25 +266,7 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
     console.log('轮询已启动，间隔2秒');
   };
   
-  // 记录登录历史
-  const recordLoginHistory = async (loginData: Partial<LoginHistory>) => {
-    try {
-      await request('/api/bilibili/record-login', {
-        method: 'POST',
-        data: {
-          ...loginData,
-          loginTime: new Date().toISOString(),
-          deviceInfo: {
-            ...deviceInfo,
-            ip: 'auto-detect',
-            location: 'auto-detect'
-          }
-        }
-      });
-    } catch (error) {
-      console.error('记录登录历史失败:', error);
-    }
-  };
+
 
   const resetQRCode = () => {
     console.log('重置二维码，清理所有状态和定时器');
