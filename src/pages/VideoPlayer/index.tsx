@@ -162,12 +162,28 @@ const VideoPlayer: React.FC = () => {
     }
   };
 
-  const handlePlayVideo = (video: VideoRecord) => {
-    // 构建播放URL
-    const playUrl = `/api/video/secure-download?token=${encodeURIComponent(video.bvid)}&file=${encodeURIComponent(video.bvid + '.mp4')}`;
-    const videoWithPlayUrl = { ...video, play_url: playUrl };
-    setSelectedVideo(videoWithPlayUrl);
-    setPlayerModalVisible(true);
+  const handlePlayVideo = async (video: VideoRecord) => {
+    try {
+      // 先生成安全下载链接
+      const result = await request('/api/video/generate-download-link', {
+        method: 'POST',
+        data: {
+          fileName: `${video.bvid}.mp4`
+        }
+      });
+      
+      if (result.code === 200) {
+        // 使用返回的安全下载URL作为播放地址
+        const videoWithPlayUrl = { ...video, play_url: result.data.downloadUrl };
+        setSelectedVideo(videoWithPlayUrl);
+        setPlayerModalVisible(true);
+      } else {
+        message.error(result.message || '生成播放链接失败');
+      }
+    } catch (error) {
+      console.error('生成播放链接失败:', error);
+      message.error('生成播放链接失败，请检查网络连接');
+    }
   };
 
   const handleDownloadVideo = async (video: VideoRecord) => {
@@ -385,7 +401,7 @@ const VideoPlayer: React.FC = () => {
               icon={<PlayCircleOutlined />}
               size="small"
               onClick={() => handlePlayVideo(record)}
-              disabled={record.download_status !== 'completed'}
+              disabled={!record.bvid}
             />
           </Tooltip>
           <Tooltip title="下载到本地">
@@ -393,7 +409,7 @@ const VideoPlayer: React.FC = () => {
               icon={<DownloadOutlined />}
               size="small"
               onClick={() => handleDownloadVideo(record)}
-              disabled={record.download_status !== 'completed'}
+              disabled={!record.bvid}
             />
           </Tooltip>
           <Tooltip title="查看详情">
