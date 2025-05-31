@@ -1,11 +1,52 @@
-import React, { useState } from 'react';
-import { Card, Input, Button, Row, Col, Typography, Space, Alert, Spin, Image, Tag, Descriptions, message, Modal } from 'antd';
-import { SearchOutlined, DownloadOutlined, PlayCircleOutlined, EyeOutlined, LikeOutlined, ShareAltOutlined } from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
+import { 
+  Card, 
+  Input, 
+  Button, 
+  Row, 
+  Col, 
+  Typography, 
+  Space, 
+  Alert, 
+  Spin, 
+  Image, 
+  Tag, 
+  Descriptions, 
+  message, 
+  Modal,
+  Select,
+  Progress,
+  List,
+  Checkbox,
+  Divider,
+  Tabs,
+  Upload,
+  notification
+} from 'antd';
+
+const { TextArea } = Input;
+const { TabPane } = Tabs;
+import { 
+  SearchOutlined, 
+  DownloadOutlined, 
+  PlayCircleOutlined, 
+  EyeOutlined, 
+  LikeOutlined, 
+  ShareAltOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  CloudDownloadOutlined,
+  FileTextOutlined,
+  SettingOutlined,
+  BulbOutlined,
+  StopOutlined,
+  ClearOutlined
+} from '@ant-design/icons';
 import { CopyToClipboard } from 'react-copy-to-clipboard';
 import { request } from '@umijs/max';
 
 const { Title, Text, Paragraph } = Typography;
-const { TextArea } = Input;
+const { Option } = Select;
 
 interface BilibiliAccount {
   id: string;
@@ -39,6 +80,26 @@ interface VideoInfo {
   audioUrl?: string;
 }
 
+interface BatchParseItem {
+  id: string;
+  url: string;
+  status: 'pending' | 'parsing' | 'completed' | 'failed';
+  videoInfo?: VideoInfo;
+  error?: string;
+  progress?: number;
+}
+
+interface DownloadTask {
+  id: string;
+  bvid: string;
+  title: string;
+  status: 'pending' | 'downloading' | 'completed' | 'failed';
+  progress: number;
+  speed?: string;
+  eta?: string;
+  error?: string;
+}
+
 interface VideoParserProps {
   accounts: BilibiliAccount[];
 }
@@ -49,8 +110,54 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [downloadUrls, setDownloadUrls] = useState<{videoUrl: string, audioUrl: string} | null>(null);
+  
+  // 批量解析相关状态
+  const [batchUrls, setBatchUrls] = useState<string>('');
+  const [batchParseItems, setBatchParseItems] = useState<BatchParseItem[]>([]);
+  const [batchParsing, setBatchParsing] = useState(false);
+  
+  // 下载相关状态
+  const [downloadTasks, setDownloadTasks] = useState<DownloadTask[]>([]);
+  const [selectedQuality, setSelectedQuality] = useState<number>(80);
+  const [downloadMode, setDownloadMode] = useState<string>('auto');
+  const [autoDownload, setAutoDownload] = useState(false);
+  
+  // 设置相关状态
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [activeTab, setActiveTab] = useState('single');
 
   const activeAccount = accounts.find(acc => acc.is_active);
+  
+  // 质量选项
+  const qualityOptions = [
+    { value: 120, label: '4K 超清 (120)' },
+    { value: 116, label: '1080P60 高清 (116)' },
+    { value: 112, label: '1080P+ 高清 (112)' },
+    { value: 80, label: '1080P 高清 (80)' },
+    { value: 74, label: '720P60 高清 (74)' },
+    { value: 64, label: '720P 高清 (64)' },
+    { value: 32, label: '480P 清晰 (32)' },
+    { value: 16, label: '360P 流畅 (16)' }
+  ];
+  
+  // 下载模式选项
+  const downloadModeOptions = [
+    { value: 'auto', label: '自动选择' },
+    { value: 'video_audio', label: '视频+音频分离' },
+    { value: 'video_only', label: '仅视频' },
+    { value: 'audio_only', label: '仅音频' }
+  ];
+  
+  useEffect(() => {
+    // 定期检查下载任务状态
+    const interval = setInterval(() => {
+      if (downloadTasks.some(task => task.status === 'downloading')) {
+        checkDownloadProgress();
+      }
+    }, 2000);
+    
+    return () => clearInterval(interval);
+  }, [downloadTasks]);
 
   const parseVideo = async () => {
     if (!inputUrl.trim()) {
@@ -74,6 +181,11 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
       if (result.code === 200) {
         setVideoInfo(result.data);
         message.success('视频解析成功！');
+        
+        // 如果开启自动下载，直接开始下载
+        if (autoDownload) {
+          startDownload(result.data);
+        }
       } else {
         message.error(result.message || '解析失败');
       }
@@ -83,6 +195,213 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
     } finally {
       setLoading(false);
     }
+  };
+  
+  // 批量解析视频
+  const batchParseVideos = async () => {
+    if (!batchUrls.trim()) {
+      message.warning('请输入视频链接');
+      return;
+    }
+    
+    if (!activeAccount) {
+      message.warning('请先登录B站账号');
+      return;
+    }
+    
+    const urls = batchUrls.split('\n').filter(url => url.trim());
+    if (urls.length === 0) {
+      message.warning('请输入有效的视频链接');
+      return;
+    }
+    
+    if (urls.length > 20) {
+      message.warning('批量解析最多支持20个视频');
+      return;
+    }
+    
+    setBatchParsing(true);
+    const items: BatchParseItem[] = urls.map((url, index) => ({
+      id: `batch_${Date.now()}_${index}`,
+      url: url.trim(),
+      status: 'pending'
+    }));
+    
+    setBatchParseItems(items);
+    
+    // 逐个解析视频
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      
+      // 更新状态为解析中
+      setBatchParseItems(prev => 
+        prev.map(p => p.id === item.id ? { ...p, status: 'parsing' } : p)
+      );
+      
+      try {
+        const result = await request(`/api/bilibili/parse-videos?input=${encodeURIComponent(item.url)}`, {
+          method: 'GET',
+        });
+        
+        if (result.code === 200) {
+          setBatchParseItems(prev => 
+            prev.map(p => p.id === item.id ? { 
+              ...p, 
+              status: 'completed', 
+              videoInfo: result.data 
+            } : p)
+          );
+          
+          // 如果开启自动下载，直接开始下载
+          if (autoDownload) {
+            startDownload(result.data);
+          }
+        } else {
+          setBatchParseItems(prev => 
+            prev.map(p => p.id === item.id ? { 
+              ...p, 
+              status: 'failed', 
+              error: result.message || '解析失败' 
+            } : p)
+          );
+        }
+      } catch (error) {
+        setBatchParseItems(prev => 
+          prev.map(p => p.id === item.id ? { 
+            ...p, 
+            status: 'failed', 
+            error: '网络错误' 
+          } : p)
+        );
+      }
+      
+      // 添加延迟避免请求过快
+      if (i < items.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    setBatchParsing(false);
+    notification.success({
+      message: '批量解析完成',
+      description: `成功解析 ${items.filter(item => item.status === 'completed').length} 个视频`
+    });
+  };
+  
+  // 开始下载视频
+  const startDownload = async (video: VideoInfo) => {
+    const taskId = `download_${Date.now()}`;
+    const newTask: DownloadTask = {
+      id: taskId,
+      bvid: video.bvid,
+      title: video.title,
+      status: 'pending',
+      progress: 0
+    };
+    
+    setDownloadTasks(prev => [...prev, newTask]);
+    
+    try {
+      const result = await request('/api/video/process', {
+        method: 'POST',
+        data: {
+          url: video.bvid,
+          quality: selectedQuality,
+          downloadMode: downloadMode
+        }
+      });
+      
+      if (result.code === 201) {
+        setDownloadTasks(prev => 
+          prev.map(task => task.id === taskId ? { 
+            ...task, 
+            status: 'downloading' 
+          } : task)
+        );
+        
+        message.success(`开始下载: ${video.title}`);
+      } else {
+        setDownloadTasks(prev => 
+          prev.map(task => task.id === taskId ? { 
+            ...task, 
+            status: 'failed',
+            error: result.message || '下载失败'
+          } : task)
+        );
+        message.error(result.message || '下载失败');
+      }
+    } catch (error) {
+      setDownloadTasks(prev => 
+        prev.map(task => task.id === taskId ? { 
+          ...task, 
+          status: 'failed',
+          error: '网络错误'
+        } : task)
+      );
+      message.error('网络错误，请重试');
+    }
+  };
+  
+  // 检查下载进度
+  const checkDownloadProgress = async () => {
+    const downloadingTasks = downloadTasks.filter(task => task.status === 'downloading');
+    
+    for (const task of downloadingTasks) {
+      try {
+        // 这里应该调用后端API获取下载进度
+        // 暂时模拟进度更新
+        const progress = Math.min(task.progress + Math.random() * 10, 100);
+        
+        setDownloadTasks(prev => 
+          prev.map(t => t.id === task.id ? { 
+            ...t, 
+            progress,
+            status: progress >= 100 ? 'completed' : 'downloading'
+          } : t)
+        );
+        
+        if (progress >= 100) {
+          notification.success({
+            message: '下载完成',
+            description: task.title
+          });
+        }
+      } catch (error) {
+        console.error('检查下载进度失败:', error);
+      }
+    }
+  };
+  
+  // 取消下载任务
+  const cancelDownload = (taskId: string) => {
+    setDownloadTasks(prev => prev.filter(task => task.id !== taskId));
+    message.info('已取消下载任务');
+  };
+  
+  // 清空批量解析结果
+  const clearBatchResults = () => {
+    setBatchParseItems([]);
+    setBatchUrls('');
+  };
+  
+  // 批量下载选中的视频
+  const batchDownloadSelected = () => {
+    const selectedItems = batchParseItems.filter(item => 
+      item.status === 'completed' && item.videoInfo
+    );
+    
+    if (selectedItems.length === 0) {
+      message.warning('没有可下载的视频');
+      return;
+    }
+    
+    selectedItems.forEach(item => {
+      if (item.videoInfo) {
+        startDownload(item.videoInfo);
+      }
+    });
+    
+    message.success(`已添加 ${selectedItems.length} 个下载任务`);
   };
 
   const getDownloadUrls = async () => {
@@ -157,134 +476,347 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
         />
       )}
 
-      {/* 输入区域 */}
-      <Card title="视频解析" style={{ marginBottom: 24 }}>
-        <Space.Compact style={{ width: '100%' }}>
-          <Input
-            placeholder="请输入B站视频链接或BV号，例如：https://www.bilibili.com/video/BV1xx411c7mD 或 BV1xx411c7mD"
-            value={inputUrl}
-            onChange={(e) => setInputUrl(e.target.value)}
-            onPressEnter={parseVideo}
-            size="large"
-          />
-          <Button 
-            type="primary" 
-            icon={<SearchOutlined />}
-            onClick={parseVideo}
-            loading={loading}
-            disabled={!activeAccount}
-            size="large"
-          >
-            解析
-          </Button>
-        </Space.Compact>
-        
-        <div style={{ marginTop: 16 }}>
-          <Text type="secondary">
-            支持格式：完整链接、BV号。解析后可获取视频详细信息和下载链接。
-          </Text>
-        </div>
-      </Card>
-
-      {/* 加载状态 */}
-      {loading && (
-        <Card>
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: 16 }}>
-              <Text>正在解析视频信息...</Text>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* 视频信息展示 */}
-      {videoInfo && (
-        <Card 
-          title="视频信息" 
-          extra={
-            <Button 
-              type="primary" 
-              icon={<DownloadOutlined />}
-              onClick={getDownloadUrls}
-              loading={loading}
-            >
-              获取下载链接
-            </Button>
-          }
-        >
-          <Row gutter={24}>
-            <Col xs={24} md={8}>
-              <Image
-                src={videoInfo.pic}
-                alt={videoInfo.title}
-                style={{ width: '100%', borderRadius: 8 }}
-                placeholder={
-                  <div style={{ 
-                    height: 200, 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    backgroundColor: '#f5f5f5'
-                  }}>
-                    <PlayCircleOutlined style={{ fontSize: 48, color: '#ccc' }} />
-                  </div>
-                }
+      <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 24 }}>
+        <TabPane tab="单个解析" key="single">
+          {/* 输入区域 */}
+          <Card title="视频解析" style={{ marginBottom: 24 }}>
+            <Space.Compact style={{ width: '100%' }}>
+              <Input
+                placeholder="请输入B站视频链接或BV号，例如：https://www.bilibili.com/video/BV1xx411c7mD 或 BV1xx411c7mD"
+                value={inputUrl}
+                onChange={(e) => setInputUrl(e.target.value)}
+                onPressEnter={parseVideo}
+                size="large"
               />
-            </Col>
+              <Button 
+                type="primary" 
+                icon={<SearchOutlined />}
+                onClick={parseVideo}
+                loading={loading}
+                disabled={!activeAccount}
+                size="large"
+              >
+                解析
+              </Button>
+            </Space.Compact>
             
-            <Col xs={24} md={16}>
-              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                <div>
-                  <Title level={3} style={{ margin: 0 }}>
-                    {videoInfo.title}
-                  </Title>
-                  <div style={{ marginTop: 8 }}>
-                    <Tag color="blue">{videoInfo.tname}</Tag>
-                    <Tag color="green">时长: {formatDuration(videoInfo.duration)}</Tag>
-                    <Tag color="orange">发布: {formatDate(videoInfo.pubdate)}</Tag>
-                  </div>
+            <div style={{ marginTop: 16 }}>
+              <Text type="secondary">
+                支持格式：完整链接、BV号。解析后可获取视频详细信息和下载链接。
+              </Text>
+            </div>
+          </Card>
+
+          {/* 加载状态 */}
+          {loading && (
+            <Card>
+              <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                <Spin size="large" />
+                <div style={{ marginTop: 16 }}>
+                  <Text>正在解析视频信息...</Text>
                 </div>
+              </div>
+            </Card>
+          )}
 
-                <Descriptions column={2} size="small">
-                  <Descriptions.Item label="UP主">{videoInfo.name}</Descriptions.Item>
-                  <Descriptions.Item label="BV号">{videoInfo.bvid}</Descriptions.Item>
-                  <Descriptions.Item label={<><EyeOutlined /> 播放</>}>
-                    {formatNumber(videoInfo.view)}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={<><LikeOutlined /> 点赞</>}>
-                    {formatNumber(videoInfo.like)}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="弹幕">
-                    {formatNumber(videoInfo.danmaku)}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="收藏">
-                    {formatNumber(videoInfo.favorite)}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="投币">
-                    {formatNumber(videoInfo.coin)}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={<><ShareAltOutlined /> 分享</>}>
-                    {formatNumber(videoInfo.share)}
-                  </Descriptions.Item>
-                </Descriptions>
+          {/* 视频信息展示 */}
+          {videoInfo && (
+            <Card 
+              title="视频信息" 
+              extra={
+                <Space>
+                  <Button 
+                    type="primary" 
+                    icon={<DownloadOutlined />}
+                    onClick={getDownloadUrls}
+                    loading={loading}
+                  >
+                    获取下载链接
+                  </Button>
+                  <Button 
+                    icon={<CloudDownloadOutlined />}
+                    onClick={() => startDownload(videoInfo)}
+                  >
+                    直接下载
+                  </Button>
+                </Space>
+              }
+            >
+              <Row gutter={24}>
+                <Col xs={24} md={8}>
+                  <Image
+                    src={videoInfo.pic}
+                    alt={videoInfo.title}
+                    style={{ width: '100%', borderRadius: 8 }}
+                    placeholder={
+                      <div style={{ 
+                        height: 200, 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        backgroundColor: '#f5f5f5'
+                      }}>
+                        <PlayCircleOutlined style={{ fontSize: 48, color: '#ccc' }} />
+                      </div>
+                    }
+                  />
+                </Col>
+                
+                <Col xs={24} md={16}>
+                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                    <div>
+                      <Title level={3} style={{ margin: 0 }}>
+                        {videoInfo.title}
+                      </Title>
+                      <div style={{ marginTop: 8 }}>
+                        <Tag color="blue">{videoInfo.tname}</Tag>
+                        <Tag color="green">时长: {formatDuration(videoInfo.duration)}</Tag>
+                        <Tag color="orange">发布: {formatDate(videoInfo.pubdate)}</Tag>
+                      </div>
+                    </div>
 
-                {videoInfo.desc && (
-                  <div>
-                    <Text strong>简介：</Text>
-                    <Paragraph 
-                      ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}
-                      style={{ marginTop: 8 }}
-                    >
-                      {videoInfo.desc}
-                    </Paragraph>
-                  </div>
-                )}
+                    <Descriptions column={2} size="small">
+                      <Descriptions.Item label="UP主">{videoInfo.name}</Descriptions.Item>
+                      <Descriptions.Item label="BV号">{videoInfo.bvid}</Descriptions.Item>
+                      <Descriptions.Item label={<><EyeOutlined /> 播放</>}>
+                        {formatNumber(videoInfo.view)}
+                      </Descriptions.Item>
+                      <Descriptions.Item label={<><LikeOutlined /> 点赞</>}>
+                        {formatNumber(videoInfo.like)}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="弹幕">
+                        {formatNumber(videoInfo.danmaku)}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="收藏">
+                        {formatNumber(videoInfo.favorite)}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="投币">
+                        {formatNumber(videoInfo.coin)}
+                      </Descriptions.Item>
+                      <Descriptions.Item label={<><ShareAltOutlined /> 分享</>}>
+                        {formatNumber(videoInfo.share)}
+                      </Descriptions.Item>
+                    </Descriptions>
+
+                    {videoInfo.desc && (
+                      <div>
+                        <Text strong>简介：</Text>
+                        <Paragraph 
+                          ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}
+                          style={{ marginTop: 8 }}
+                        >
+                          {videoInfo.desc}
+                        </Paragraph>
+                      </div>
+                    )}
+                  </Space>
+                </Col>
+              </Row>
+            </Card>
+          )}
+        </TabPane>
+        
+        <TabPane tab="批量解析" key="batch">
+          <Card title="批量视频解析" style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 16 }}>
+              <TextArea
+                placeholder="请输入B站视频链接，每行一个\n支持BV号、av号或完整链接\n最多支持20个视频"
+                value={batchUrls}
+                onChange={(e) => setBatchUrls(e.target.value)}
+                rows={6}
+                style={{ marginBottom: 8 }}
+              />
+              <Space>
+                <Button 
+                  type="primary" 
+                  onClick={batchParseVideos}
+                  loading={batchParsing}
+                  icon={<PlayCircleOutlined />}
+                >
+                  开始批量解析
+                </Button>
+                <Button onClick={clearBatchResults} icon={<DeleteOutlined />}>
+                  清空结果
+                </Button>
+                <Button 
+                  onClick={batchDownloadSelected}
+                  icon={<DownloadOutlined />}
+                  disabled={batchParseItems.filter(item => item.status === 'completed').length === 0}
+                >
+                  批量下载
+                </Button>
               </Space>
-            </Col>
-          </Row>
-        </Card>
-      )}
+            </div>
+            
+            {batchParseItems.length > 0 && (
+              <Card title="解析结果" style={{ marginTop: 16 }}>
+                <List
+                  dataSource={batchParseItems}
+                  renderItem={(item) => (
+                    <List.Item>
+                      <div style={{ width: '100%' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text ellipsis style={{ flex: 1, marginRight: 8, fontSize: 12, color: '#666' }}>{item.url}</Text>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {item.status === 'pending' && <Tag color="default">等待中</Tag>}
+                            {item.status === 'parsing' && <Tag color="processing">解析中</Tag>}
+                            {item.status === 'completed' && <Tag color="success">完成</Tag>}
+                            {item.status === 'failed' && <Tag color="error">失败</Tag>}
+                          </div>
+                        </div>
+                        
+                        {item.status === 'completed' && item.videoInfo && (
+                          <div style={{ display: 'flex', gap: 12, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 6 }}>
+                            <Image
+                              src={item.videoInfo.pic} 
+                              alt={item.videoInfo.title}
+                              width={80}
+                              height={48}
+                              style={{ borderRadius: 4, objectFit: 'cover' }}
+                            />
+                            <div style={{ flex: 1 }}>
+                              <Title level={5} style={{ margin: 0, marginBottom: 4, fontSize: 14 }}>{item.videoInfo.title}</Title>
+                              <Text style={{ fontSize: 12, color: '#666' }}>UP主: {item.videoInfo.name}</Text>
+                            </div>
+                            <Button 
+                              size="small"
+                              onClick={() => startDownload(item.videoInfo!)}
+                              icon={<DownloadOutlined />}
+                            >
+                              下载
+                            </Button>
+                          </div>
+                        )}
+                        
+                        {item.status === 'failed' && (
+                          <div style={{ color: '#ff4d4f', fontSize: 12, marginTop: 4 }}>
+                            错误: {item.error}
+                          </div>
+                        )}
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              </Card>
+            )}
+          </Card>
+        </TabPane>
+        
+        <TabPane tab="下载管理" key="downloads">
+          <Card title="下载任务管理" style={{ marginBottom: 24 }}>
+            {downloadTasks.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#666' }}>
+                <CloudDownloadOutlined style={{ fontSize: 48, marginBottom: 8 }} />
+                <div>暂无下载任务</div>
+              </div>
+            ) : (
+              <List
+                dataSource={downloadTasks}
+                renderItem={(task) => (
+                  <List.Item>
+                    <div style={{ width: '100%' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <div style={{ flex: 1 }}>
+                          <Title level={5} style={{ margin: 0 }}>{task.title}</Title>
+                          <Text style={{ fontSize: 12, color: '#666' }}>BV号: {task.bvid}</Text>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {task.status === 'pending' && <Tag color="default">等待中</Tag>}
+                          {task.status === 'downloading' && <Tag color="processing">下载中</Tag>}
+                          {task.status === 'completed' && <Tag color="success">已完成</Tag>}
+                          {task.status === 'failed' && <Tag color="error">失败</Tag>}
+                          
+                          {task.status === 'downloading' && (
+                            <Button 
+                              size="small" 
+                              danger 
+                              onClick={() => cancelDownload(task.id)}
+                              icon={<DeleteOutlined />}
+                            >
+                              取消
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {task.status === 'downloading' && (
+                        <Progress 
+                          percent={Math.round(task.progress)} 
+                          size="small" 
+                          status="active"
+                        />
+                      )}
+                      
+                      {task.status === 'failed' && task.error && (
+                        <div style={{ color: '#ff4d4f', fontSize: 12, marginTop: 4 }}>
+                          错误: {task.error}
+                        </div>
+                      )}
+                    </div>
+                  </List.Item>
+                )}
+              />
+            )}
+          </Card>
+        </TabPane>
+      </Tabs>
+      
+      {/* 设置按钮 */}
+      <div style={{ position: 'fixed', bottom: 24, right: 24 }}>
+        <Button 
+          type="primary" 
+          shape="circle" 
+          size="large"
+          icon={<SettingOutlined />}
+          onClick={() => setSettingsVisible(true)}
+        />
+      </div>
+      
+      {/* 设置模态框 */}
+      <Modal
+        title="下载设置"
+        open={settingsVisible}
+        onCancel={() => setSettingsVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setSettingsVisible(false)}>
+            取消
+          </Button>,
+          <Button key="save" type="primary" onClick={() => setSettingsVisible(false)}>
+            保存设置
+          </Button>
+        ]}
+      >
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <div>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>默认视频质量</Text>
+            <Select
+              value={selectedQuality}
+              onChange={setSelectedQuality}
+              style={{ width: '100%' }}
+              options={qualityOptions}
+            />
+          </div>
+          
+          <div>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>下载模式</Text>
+            <Select
+              value={downloadMode}
+              onChange={setDownloadMode}
+              style={{ width: '100%' }}
+              options={downloadModeOptions}
+            />
+          </div>
+          
+          <div>
+            <Checkbox
+              checked={autoDownload}
+              onChange={(e) => setAutoDownload(e.target.checked)}
+            >
+              解析完成后自动开始下载
+            </Checkbox>
+          </div>
+        </Space>
+      </Modal>
 
       {/* 下载链接模态框 */}
       <Modal
