@@ -304,15 +304,15 @@ const VideoPlayer: React.FC = () => {
   const filteredVideos = videos.filter(video => {
     const matchesSearch = !searchText || 
       video.title.toLowerCase().includes(searchText.toLowerCase()) ||
-      video.author.toLowerCase().includes(searchText.toLowerCase()) ||
+      video.name.toLowerCase().includes(searchText.toLowerCase()) ||
       video.bvid.toLowerCase().includes(searchText.toLowerCase());
     
     const matchesStatus = statusFilter === 'all' || video.download_status === statusFilter;
     const matchesQuality = qualityFilter === 'all' || video.quality.toString() === qualityFilter;
     
-    const matchesDate = !dateRange || (
-      dayjs(video.created_at).isAfter(dateRange[0]) &&
-      dayjs(video.created_at).isBefore(dateRange[1])
+    const matchesDate = !dateRange || !video.pubdate || (
+      dayjs(video.pubdate).isAfter(dateRange[0]) &&
+      dayjs(video.pubdate).isBefore(dateRange[1])
     );
     
     return matchesSearch && matchesStatus && matchesQuality && matchesDate;
@@ -327,7 +327,7 @@ const VideoPlayer: React.FC = () => {
       render: (_, record) => (
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <Image
-            src={record.thumbnail_url}
+            src={record.pic}
             alt={record.title}
             width={80}
             height={60}
@@ -340,7 +340,7 @@ const VideoPlayer: React.FC = () => {
             </div>
             <div style={{ color: '#666', fontSize: 12 }}>
               <Space size={16}>
-                <span><UserOutlined /> {record.author}</span>
+                <span><UserOutlined /> {record.name}</span>
                 <span><VideoCameraOutlined /> {record.bvid}</span>
                 <span><ClockCircleOutlined /> {formatDuration(record.duration)}</span>
               </Space>
@@ -355,9 +355,9 @@ const VideoPlayer: React.FC = () => {
       width: 200,
       render: (_, record) => (
         <Space direction="vertical" size={4}>
-          <div><EyeOutlined /> 播放: {record.view_count?.toLocaleString() || 0}</div>
-          <div><LikeOutlined /> 点赞: {record.like_count?.toLocaleString() || 0}</div>
-          <div><HeartOutlined /> 收藏: {record.favorite_count?.toLocaleString() || 0}</div>
+          <div><EyeOutlined /> 播放: {record.view?.toLocaleString() || 0}</div>
+          <div><LikeOutlined /> 点赞: {record.like?.toLocaleString() || 0}</div>
+          <div><HeartOutlined /> 收藏: {record.favorite?.toLocaleString() || 0}</div>
         </Space>
       ),
     },
@@ -383,11 +383,11 @@ const VideoPlayer: React.FC = () => {
       render: (status) => getStatusTag(status),
     },
     {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
+      title: '发布时间',
+      dataIndex: 'pubdate',
+      key: 'pubdate',
       width: 150,
-      render: (date) => dayjs(date).format('YYYY-MM-DD HH:mm'),
+      render: (date) => date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '-',
     },
     {
       title: '操作',
