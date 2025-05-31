@@ -1,1190 +1,3 @@
-// model/video/videoRouters.js
-
-const express = require("express");
-const router = express.Router();
-const videoUtils = require("./videoUtils");
-const bilibiliUtils = require("../bilibili/bilibiliUtils");
-const authorize = require("../auth/authUtils"); // 导入授权中间件
-
-/**
- * @api {get} /api/video/list
- * @description 获取所有已处理的视频列表
- * @access Public
- */
-router.get("/list", async (req, res) => {
-  try {
-    const videos = await videoUtils.listAllVideos();
-    res.status(200).json({
-      code: 200,
-      message: "成功获取视频列表",
-      data: videos,
-    });
-  } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: error.message || "获取视频列表失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {get} /api/video/user-list
- * @description 获取当前用户处理的视频列表
- * @access Protected - 需要用户登录
- */
-router.get("/user-list", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const videos = await videoUtils.getUserVideos(userId);
-    res.status(200).json({
-      code: 200,
-      message: "成功获取用户视频列表",
-      data: videos,
-    });
-  } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: error.message || "获取用户视频列表失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {post} /api/video/parse
- * @description 解析B站视频信息（不下载，仅获取视频详情）
- * @access Protected - 需要用户登录和B站账号
- * @body { "url": "视频的URL或BVID", "quality": "清晰度(可选)" }
- */
-router.post("/parse", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { url, quality = 80 } = req.body;
-    
-    if (!url || !url.trim()) {
-      return res.status(400).json({
-        code: 400,
-        message: "请提供有效的视频 URL",
-        data: null,
-      });
-    }
-
-    // 检查用户是否有活跃的B站账号
-    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
-    if (!bilibiliAccount) {
-      return res.status(400).json({
-        code: 400,
-        message: "请先登录B站账号",
-        data: null
-      });
-    }
-
-    console.log(`▶️ 开始解析视频: ${url}`);
-    const result = await videoUtils.parseVideoInfo(url, bilibiliAccount.cookie_string, quality);
-    console.log(`✅ 视频解析完成: ${result.title}`);
-    
-    res.status(200).json({
-      code: 200,
-      message: "视频解析成功",
-      data: result,
-    });
-  } catch (error) {
-    console.error(`❌ 解析视频失败:`, error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "解析视频失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {post} /api/video/process
- * @description 处理B站视频（解析、下载、合并、入库）
- * @access Protected - 需要用户登录和B站账号
- * @body { "url": "视频的URL或BVID", "quality": "清晰度(可选)", "downloadMode": "下载模式(可选)" }
- */
-router.post("/process", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { url, quality = 80, downloadMode = "auto" } = req.body;
-    
-    if (!url || !url.trim()) {
-      return res.status(400).json({
-        code: 400,
-        message: "请提供有效的视频 URL",
-        data: null,
-      });
-    }
-
-    // 检查用户是否有活跃的B站账号
-    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
-    if (!bilibiliAccount) {
-      return res.status(400).json({
-        code: 400,
-        message: "请先登录B站账号",
-        data: null
-      });
-    }
-
-    console.log(`▶️ 开始处理视频请求: ${url}`);
-    const result = await videoUtils.processVideoRequest({
-      url,
-      userId,
-      cookieString: bilibiliAccount.cookie_string,
-      quality,
-      downloadMode,
-      bilibiliAccountId: bilibiliAccount.id
-    });
-    console.log(`✅ 视频处理完成: ${result.title}`);
-    
-    res.status(201).json({
-      code: 201,
-      message: "视频处理成功并已入库",
-      data: result,
-    });
-  } catch (error) {
-    console.error(`❌ 处理视频失败:`, error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "处理视频时发生未知错误",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {post} /api/video/batch-process
- * @description 批量处理B站视频
- * @access Protected - 需要用户登录和B站账号
- * @body { "urls": ["视频URL数组"], "quality": "清晰度(可选)", "downloadMode": "下载模式(可选)" }
- */
-router.post("/batch-process", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { urls, quality = 80, downloadMode = "auto" } = req.body;
-    
-    if (!urls || !Array.isArray(urls) || urls.length === 0) {
-      return res.status(400).json({
-        code: 400,
-        message: "请提供有效的视频 URL 数组",
-        data: null,
-      });
-    }
-
-    if (urls.length > 10) {
-      return res.status(400).json({
-        code: 400,
-        message: "批量处理最多支持10个视频",
-        data: null,
-      });
-    }
-
-    // 检查用户是否有活跃的B站账号
-    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
-    if (!bilibiliAccount) {
-      return res.status(400).json({
-        code: 400,
-        message: "请先登录B站账号",
-        data: null
-      });
-    }
-
-    console.log(`▶️ 开始批量处理 ${urls.length} 个视频`);
-    const results = await videoUtils.batchProcessVideos({
-      urls,
-      userId,
-      cookieString: bilibiliAccount.cookie_string,
-      quality,
-      downloadMode,
-      bilibiliAccountId: bilibiliAccount.id
-    });
-    console.log(`✅ 批量处理完成，成功: ${results.success.length}, 失败: ${results.failed.length}`);
-    
-    res.status(200).json({
-      code: 200,
-      message: `批量处理完成，成功: ${results.success.length}, 失败: ${results.failed.length}`,
-      data: results,
-    });
-  } catch (error) {
-    console.error(`❌ 批量处理视频失败:`, error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "批量处理视频失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {delete} /api/video/:id
- * @description 删除视频记录和文件
- * @access Protected - 需要用户登录
- */
-router.delete("/:id", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { id } = req.params;
-    const { deleteFile = false } = req.query;
-    
-    await videoUtils.deleteVideo(id, userId, deleteFile === 'true');
-    
-    res.status(200).json({
-      code: 200,
-      message: "视频删除成功",
-      data: null,
-    });
-  } catch (error) {
-    console.error(`❌ 删除视频失败:`, error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "删除视频失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {post} /api/video/generate-download-link
- * @description 生成安全下载链接
- * @access Protected - 需要用户登录
- */
-router.post("/generate-download-link", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const { fileName } = req.body;
-    const userId = req.user.uid || req.user.id;
-    
-    if (!fileName) {
-      return res.status(400).json({
-        code: 400,
-        message: "文件名不能为空",
-        data: null,
-      });
-    }
-    
-    // 检查用户是否有权限下载该文件
-    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
-    if (!hasPermission) {
-      return res.status(403).json({
-        code: 403,
-        message: "无权限下载该文件",
-        data: null,
-      });
-    }
-    
-    // 生成安全下载链接
-    const downloadInfo = videoUtils.generateSecureDownloadLink(fileName, userId);
-    
-    res.status(200).json({
-      code: 200,
-      message: "下载链接生成成功",
-      data: downloadInfo,
-    });
-  } catch (error) {
-    console.error("生成下载链接失败:", error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "生成下载链接失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {get} /api/video/secure-download
- * @description 安全文件下载（支持断点续传）
- * @access Public - 通过token验证
- */
-router.get("/secure-download", async (req, res) => {
-  try {
-    const { token, file } = req.query;
-    
-    if (!token || !file) {
-      return res.status(400).json({
-        code: 400,
-        message: "缺少必要参数",
-        data: null,
-      });
-    }
-    
-    // 验证token
-    const payload = videoUtils.verifyDownloadToken(token);
-    if (!payload) {
-      return res.status(401).json({
-        code: 401,
-        message: "下载链接已过期或无效",
-        data: null,
-      });
-    }
-    
-    // 验证文件名是否匹配
-    if (payload.fileName !== file) {
-      return res.status(403).json({
-        code: 403,
-        message: "文件访问权限验证失败",
-        data: null,
-      });
-    }
-    
-    // 再次检查用户权限
-    const hasPermission = await videoUtils.checkDownloadPermission(file, payload.userId);
-    if (!hasPermission) {
-      return res.status(403).json({
-        code: 403,
-        message: "无权限下载该文件",
-        data: null,
-      });
-    }
-    
-    // 处理安全下载
-    await videoUtils.handleSecureDownload(file, req, res);
-    
-  } catch (error) {
-    console.error("安全下载失败:", error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        code: 500,
-        message: error.message || "下载失败",
-        data: null,
-      });
-    }
-  }
-});
-
-/**
- * @api {get} /api/video/download/:bvid
- * @description 直接下载视频（兼容旧版本）
- * @access Protected - 需要用户登录
- */
-router.get("/download/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const { bvid } = req.params;
-    const userId = req.user.uid || req.user.id;
-    
-    // 构造文件名
-    const fileName = `${bvid}.mp4`;
-    
-    // 检查用户是否有权限下载该文件
-    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
-    if (!hasPermission) {
-      return res.status(403).json({
-        code: 403,
-        message: "无权限下载该文件",
-        data: null,
-      });
-    }
-    
-    // 处理安全下载
-    await videoUtils.handleSecureDownload(fileName, req, res);
-    
-  } catch (error) {
-    console.error("直接下载失败:", error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        code: 500,
-        message: error.message || "下载失败",
-        data: null,
-      });
-    }
-  }
-});
-
-module.exports = router;
-// model/video/videoUtils.js
-
-const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
-const { spawn } = require("child_process");
-const { v4: uuidv4 } = require("uuid");
-const jwt = require("jsonwebtoken");
-const crypto = require("crypto");
-const db = require("../../config/db").promise();
-const bilibiliUtils = require("../bilibili/bilibiliUtils");
-
-// 配置路径
-const DOWNLOAD_DIR = path.join(__dirname, "../../downloads"); // 临时下载目录
-const VIDEO_DIR = path.join(__dirname, "../../videos"); // 最终视频存储目录
-const FFMPEG_PATH = "ffmpeg"; // FFmpeg 可执行文件路径，确保已安装并在 PATH 中
-
-// 确保目录存在
-if (!fs.existsSync(DOWNLOAD_DIR)) {
-  fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
-  console.log(`📁 创建临时下载目录: ${DOWNLOAD_DIR}`);
-}
-
-if (!fs.existsSync(VIDEO_DIR)) {
-  fs.mkdirSync(VIDEO_DIR, { recursive: true });
-  console.log(`📁 创建视频存储目录: ${VIDEO_DIR}`);
-}
-
-// 视频质量映射
-const QUALITY_MAP = {
-  120: "4K 超清",
-  116: "1080P60 高清",
-  112: "1080P+ 高清",
-  80: "1080P 高清",
-  74: "720P60 高清",
-  64: "720P 高清",
-  32: "480P 清晰",
-  16: "360P 流畅"
-};
-
-/**
- * 提取BVID从URL
- * @param {string} url - 视频URL或BVID
- * @returns {string} BVID
- */
-function extractBVID(url) {
-  if (url.startsWith('BV')) {
-    return url;
-  }
-  const bvidMatch = url.match(/BV[a-zA-Z0-9]+/);
-  if (bvidMatch) {
-    return bvidMatch[0];
-  }
-  throw new Error('无法从URL中提取BVID');
-}
-
-/**
- * 解析B站视频信息（使用B站账号Cookie）
- * @param {string} url - 视频URL或BVID
- * @param {string} cookieString - B站账号Cookie
- * @param {number} quality - 视频质量
- * @returns {Promise<Object>} 视频信息
- */
-async function parseVideoInfo(url, cookieString, quality = 80) {
-  try {
-    const bvid = extractBVID(url);
-    console.log(`🔍 正在解析视频信息: ${bvid}`);
-    
-    // 获取视频信息和下载链接
-    const videoInfo = await bilibiliUtils.getBilibiliVideoInfo(bvid, cookieString);
-    
-    const result = {
-      bvid: bvid,
-      aid: videoInfo.aid || null,
-      title: videoInfo.title,
-      description: videoInfo.description,
-      duration: videoInfo.duration,
-      view: videoInfo.stat.view,
-      like: videoInfo.stat.like,
-      coin: videoInfo.stat.coin,
-      share: videoInfo.stat.share,
-      reply: videoInfo.stat.reply,
-      favorite: videoInfo.stat.favorite,
-      owner: {
-        mid: videoInfo.owner.mid,
-        name: videoInfo.owner.name,
-        face: videoInfo.owner.face || null
-      },
-      pubdate: videoInfo.pubdate || null,
-      pic: videoInfo.pic,
-      pages: videoInfo.pages || [],
-      quality: quality,
-      qualityDesc: QUALITY_MAP[quality] || '未知画质',
-      downloadUrls: videoInfo.downloadUrls,
-      videoUrl: videoInfo.downloadUrls.video,
-      audioUrl: videoInfo.downloadUrls.audio,
-      fileSize: null // 文件大小需要在下载时获取
-    };
-    
-    console.log(`✅ 视频信息解析完成: ${result.title}`);
-    return result;
-  } catch (error) {
-    console.error(`❌ 解析视频信息失败:`, error.message);
-    throw new Error(`解析视频信息失败: ${error.message}`);
-  }
-}
-
-/**
- * 下载文件（支持进度回调）
- * @param {string} url - 下载链接
- * @param {string} filePath - 保存路径
- * @param {string} cookieString - B站Cookie
- * @param {Function} progressCallback - 进度回调函数
- * @returns {Promise<void>}
- */
-async function downloadFile(url, filePath, cookieString, progressCallback) {
-  try {
-    console.log(`⬇️ 开始下载文件: ${path.basename(filePath)}`);
-    
-    const response = await axios({
-      method: "GET",
-      url: url,
-      responseType: "stream",
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://www.bilibili.com/",
-        "Cookie": cookieString,
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
-      },
-      timeout: 30000
-    });
-
-    const totalLength = parseInt(response.headers['content-length'], 10);
-    let downloadedLength = 0;
-
-    const writer = fs.createWriteStream(filePath);
-    
-    response.data.on('data', (chunk) => {
-      downloadedLength += chunk.length;
-      if (progressCallback && totalLength) {
-        const progress = (downloadedLength / totalLength * 100).toFixed(2);
-        progressCallback(progress, downloadedLength, totalLength);
-      }
-    });
-    
-    response.data.pipe(writer);
-
-    return new Promise((resolve, reject) => {
-      writer.on("finish", () => {
-        console.log(`✅ 文件下载完成: ${path.basename(filePath)}`);
-        resolve();
-      });
-      writer.on("error", (error) => {
-        console.error(`❌ 文件下载失败: ${path.basename(filePath)}`, error);
-        reject(error);
-      });
-    });
-  } catch (error) {
-    console.error(`❌ 下载文件失败: ${path.basename(filePath)}`, error.message);
-    throw error;
-  }
-}
-
-/**
- * 使用 FFmpeg 合并视频和音频（支持进度回调）
- * @param {string} videoPath - 视频文件路径
- * @param {string} audioPath - 音频文件路径
- * @param {string} outputPath - 输出文件路径
- * @param {Function} progressCallback - 进度回调函数
- * @returns {Promise<void>}
- */
-function mergeVideoAndAudio(videoPath, audioPath, outputPath, progressCallback) {
-  return new Promise((resolve, reject) => {
-    console.log(`🔧 开始合并视频和音频: ${path.basename(outputPath)}`);
-
-    const ffmpeg = spawn(FFMPEG_PATH, [
-      "-i", videoPath,
-      "-i", audioPath,
-      "-c:v", "copy",
-      "-c:a", "aac",
-      "-strict", "experimental",
-      "-y", // 覆盖输出文件
-      outputPath,
-    ]);
-
-    let duration = null;
-    
-    ffmpeg.stderr.on("data", (data) => {
-      const output = data.toString();
-      
-      // 提取总时长
-      if (!duration) {
-        const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
-        if (durationMatch) {
-          const hours = parseInt(durationMatch[1]);
-          const minutes = parseInt(durationMatch[2]);
-          const seconds = parseInt(durationMatch[3]);
-          duration = hours * 3600 + minutes * 60 + seconds;
-        }
-      }
-      
-      // 提取当前进度
-      if (duration && progressCallback) {
-        const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
-        if (timeMatch) {
-          const hours = parseInt(timeMatch[1]);
-          const minutes = parseInt(timeMatch[2]);
-          const seconds = parseInt(timeMatch[3]);
-          const currentTime = hours * 3600 + minutes * 60 + seconds;
-          const progress = (currentTime / duration * 100).toFixed(2);
-          progressCallback(progress, currentTime, duration);
-        }
-      }
-    });
-
-    ffmpeg.on("close", (code) => {
-      if (code === 0) {
-        console.log(`✅ 视频合并完成: ${path.basename(outputPath)}`);
-        resolve();
-      } else {
-        console.error(`❌ FFmpeg 进程退出，代码: ${code}`);
-        reject(new Error(`FFmpeg 合并失败，退出代码: ${code}`));
-      }
-    });
-
-    ffmpeg.on("error", (error) => {
-      console.error(`❌ FFmpeg 启动失败:`, error);
-      reject(error);
-    });
-  });
-}
-
-/**
- * 将视频信息保存到数据库
- * @param {Object} videoInfo - 视频信息
- * @param {string} filePath - 文件路径
- * @param {string} playUrl - 播放地址
- * @param {number} userId - 用户ID
- * @param {number} bilibiliAccountId - B站账号ID
- * @returns {Promise<Object>} 数据库记录
- */
-async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilibiliAccountId) {
-  try {
-    console.log(`💾 保存视频信息到数据库: ${videoInfo.title}`);
-
-    // 检查视频是否已存在（根据bvid）
-    const [existingVideos] = await db.execute(
-      "SELECT * FROM videos WHERE bvid = ?",
-      [videoInfo.bvid]
-    );
-
-    if (existingVideos.length > 0) {
-      // 更新现有记录
-      await db.execute(
-        `UPDATE videos SET 
-         title = ?, pic = ?, view = ?, danmaku = ?, \`like\` = ?, 
-         coin = ?, favorite = ?, share = ?, reply = ?, 
-         name = ?, face = ?, pubdate = ?, 
-         quality = ?, \`desc\` = ?, duration = ?, aid = ?, download_link = ?
-         WHERE bvid = ?`,
-        [
-          videoInfo.title,
-          videoInfo.pic || "",
-          videoInfo.view || 0,
-          videoInfo.stat?.danmaku || 0,
-          videoInfo.like || 0,
-          videoInfo.coin || 0,
-          videoInfo.favorite || 0,
-          videoInfo.share || 0,
-          videoInfo.reply || 0,
-          videoInfo.owner?.name || "未知",
-          videoInfo.owner?.face || "",
-          videoInfo.pubdate || "",
-          videoInfo.quality || 80,
-          videoInfo.description || "",
-          videoInfo.duration || 0,
-          videoInfo.aid || "",
-          playUrl,
-          videoInfo.bvid
-        ]
-      );
-      
-      console.log(`✅ 视频信息已更新: ${videoInfo.title}`);
-      return { 
-        id: existingVideos[0].id, 
-        updated: true,
-        title: videoInfo.title,
-        bvid: videoInfo.bvid,
-        filePath: filePath,
-        playUrl: playUrl
-      };
-    } else {
-      // 插入新记录
-      const [result] = await db.execute(
-        `INSERT INTO videos (
-          bvid, aid, title, pic, view, danmaku, \`like\`, coin, favorite, share, reply,
-          name, face, pubdate, quality, \`desc\`, duration, download_link
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          videoInfo.bvid,
-          videoInfo.aid || "",
-          videoInfo.title,
-          videoInfo.pic || "",
-          videoInfo.view || 0,
-          videoInfo.stat?.danmaku || 0,
-          videoInfo.like || 0,
-          videoInfo.coin || 0,
-          videoInfo.favorite || 0,
-          videoInfo.share || 0,
-          videoInfo.reply || 0,
-          videoInfo.owner?.name || "未知",
-          videoInfo.owner?.face || "",
-          videoInfo.pubdate || "",
-          videoInfo.quality || 80,
-          videoInfo.description || "",
-          videoInfo.duration || 0,
-          playUrl
-        ]
-      );
-      
-      console.log(`✅ 视频信息已保存: ${videoInfo.title}`);
-      return { 
-        id: result.insertId, 
-        updated: false,
-        title: videoInfo.title,
-        bvid: videoInfo.bvid,
-        filePath: filePath,
-        playUrl: playUrl
-      };
-    }
-  } catch (error) {
-    console.error('❌ 保存视频信息到数据库失败:', error);
-    throw error;
-  }
-}
-
-
-/**
- * 获取所有视频列表
- * @returns {Promise<Array>} 视频列表
- */
-async function listAllVideos() {
-  try {
-    const [videos] = await db.execute(
-      `SELECT * FROM videos ORDER BY id DESC`
-    );
-    return videos;
-  } catch (error) {
-    console.error(`❌ 获取视频列表失败:`, error);
-    throw error;
-  }
-}
-
-/**
- * 获取用户的视频列表
- * @param {number} userId - 用户ID（暂时不使用，返回所有视频）
- * @returns {Promise<Array>} 用户视频列表
- */
-async function getUserVideos(userId) {
-  try {
-    // 由于当前表结构没有user_id字段，暂时返回所有视频
-    const [videos] = await db.execute(
-      `SELECT * FROM videos ORDER BY id DESC`
-    );
-    return videos;
-  } catch (error) {
-    console.error(`❌ 获取用户视频列表失败:`, error);
-    throw error;
-  }
-}
-
-/**
- * 删除视频记录和文件
- * @param {number} videoId - 视频ID
- * @param {number} userId - 用户ID（暂时不使用）
- * @param {boolean} deleteFile - 是否删除文件
- * @returns {Promise<void>}
- */
-async function deleteVideo(videoId, userId, deleteFile = false) {
-  try {
-    // 获取视频信息
-    const [videos] = await db.execute(
-      "SELECT * FROM videos WHERE id = ?",
-      [videoId]
-    );
-    
-    if (videos.length === 0) {
-      throw new Error('视频不存在');
-    }
-    
-    const video = videos[0];
-    
-    // 删除数据库记录
-    await db.execute("DELETE FROM videos WHERE id = ?", [videoId]);
-    
-    // 删除文件
-    if (deleteFile && video.file_path && fs.existsSync(video.file_path)) {
-      fs.unlinkSync(video.file_path);
-      console.log(`🗑️ 删除视频文件: ${video.file_path}`);
-    }
-    
-    console.log(`✅ 删除视频记录: ${video.title}`);
-  } catch (error) {
-    console.error(`❌ 删除视频失败:`, error);
-    throw error;
-  }
-}
-
-/**
- * 处理视频请求的主函数
- * @param {Object} options - 处理选项
- * @returns {Promise<Object>} 处理结果
- */
-async function processVideoRequest(options) {
-  const {
-    url,
-    userId,
-    cookieString,
-    quality = 80,
-    downloadMode = "auto",
-    bilibiliAccountId
-  } = options;
-  
-  try {
-    // 0. 提取BVID进行预检查
-    const bvid = extractBVID(url);
-    if (!bvid) {
-      throw new Error('无法从URL中提取BVID');
-    }
-    
-    // 1. 检查数据库和文件是否已存在（优化：避免重复解析）
-    const finalFileName = `${bvid}.mp4`;
-    const finalVideoPath = path.join(VIDEO_DIR, finalFileName);
-    
-    // 检查数据库中是否已有记录
-    const [existingRecords] = await db.execute(
-      'SELECT * FROM videos WHERE bvid = ?',
-      [bvid]
-    );
-    
-    // 检查文件是否存在
-    const fileExists = fs.existsSync(finalVideoPath);
-    
-    if (existingRecords.length > 0 && fileExists) {
-      console.log(`✅ 发现已存在的视频记录和文件: ${bvid}`);
-      
-      // 只解析基本信息用于更新数据库
-      const videoInfo = await parseVideoInfo(url, cookieString, quality);
-      
-      // 生成播放地址
-      const serverPort = process.env.PORT || 3000;
-      const serverHost = process.env.SERVER_HOST || 'localhost';
-      const playUrl = `http://${serverHost}:${serverPort}/api/video/download/${finalFileName}`;
-      
-      // 更新数据库记录（保持文件路径不变）
-      const existingRecord = existingRecords[0];
-      await db.execute(
-        `UPDATE videos SET 
-         title = ?, pic = ?, view = ?, duration = ?, 
-         download_link = ? 
-         WHERE id = ?`,
-        [
-          videoInfo.title,
-          videoInfo.pic,
-          videoInfo.view,
-          videoInfo.duration,
-          playUrl,
-          existingRecord.id
-        ]
-      );
-      
-      console.log(`🔄 已更新现有视频记录: ${videoInfo.title}`);
-      
-      return {
-        id: existingRecord.id,
-        updated: true,
-        title: videoInfo.title,
-        bvid: bvid,
-        filePath: finalVideoPath,
-        playUrl: playUrl,
-        message: "视频已存在，仅更新数据库信息",
-        downloadMode,
-        qualityDesc: videoInfo.qualityDesc,
-        skippedProcessing: true // 标记跳过了处理过程
-      };
-    }
-    
-    console.log(`🆕 开始处理新视频或重新处理: ${bvid}`);
-    
-    // 2. 解析视频信息（完整解析用于下载）
-    const videoInfo = await parseVideoInfo(url, cookieString, quality);
-
-    // 3. 创建文件名和路径
-    const uniqueId = uuidv4().substring(0, 8);
-    const tempVideoFileName = `${videoInfo.bvid}_${uniqueId}_video.mp4`;
-    const tempAudioFileName = `${videoInfo.bvid}_${uniqueId}_audio.mp3`;
-    const tempOutputFileName = `${videoInfo.bvid}_${uniqueId}_temp.mp4`;
-    // finalFileName 已在前面声明过，这里不需要重复声明
-
-    const tempVideoPath = path.join(DOWNLOAD_DIR, tempVideoFileName);
-    const tempAudioPath = path.join(DOWNLOAD_DIR, tempAudioFileName);
-    const tempOutputPath = path.join(DOWNLOAD_DIR, tempOutputFileName);
-    // finalVideoPath 也已在前面声明过，这里不需要重复声明
-
-    // 4. 下载视频和音频
-    console.log(`📥 开始下载视频和音频...`);
-    
-    const downloadPromises = [];
-    
-    if (downloadMode === "video" || downloadMode === "auto") {
-      downloadPromises.push(
-        downloadFile(videoInfo.videoUrl, tempVideoPath, cookieString, (progress) => {
-          console.log(`📹 视频下载进度: ${progress}%`);
-        })
-      );
-    }
-    
-    if (downloadMode === "audio" || downloadMode === "auto") {
-      downloadPromises.push(
-        downloadFile(videoInfo.audioUrl, tempAudioPath, cookieString, (progress) => {
-          console.log(`🎵 音频下载进度: ${progress}%`);
-        })
-      );
-    }
-    
-    await Promise.all(downloadPromises);
-
-    // 5. 合并视频和音频（如果都下载了）
-    let tempFinalPath = tempOutputPath;
-    if (downloadMode === "auto" && fs.existsSync(tempVideoPath) && fs.existsSync(tempAudioPath)) {
-      console.log(`🔧 开始合并视频和音频: ${finalFileName}`);
-      await mergeVideoAndAudio(tempVideoPath, tempAudioPath, tempOutputPath, (progress) => {
-        console.log(`🔧 合并进度: ${progress}%`);
-      });
-      
-      // 清理临时文件
-      try {
-        fs.unlinkSync(tempVideoPath);
-        fs.unlinkSync(tempAudioPath);
-        console.log(`🗑️ 清理临时文件完成`);
-      } catch (cleanupError) {
-        console.warn(`⚠️ 清理临时文件失败:`, cleanupError.message);
-      }
-    } else if (downloadMode === "video" && fs.existsSync(tempVideoPath)) {
-      tempFinalPath = tempVideoPath;
-    } else if (downloadMode === "audio" && fs.existsSync(tempAudioPath)) {
-      tempFinalPath = tempAudioPath;
-    }
-
-    // 6. 移动文件到最终目录
-    if (fs.existsSync(tempFinalPath)) {
-      // 如果最终文件已存在，先删除
-      if (fs.existsSync(finalVideoPath)) {
-        fs.unlinkSync(finalVideoPath);
-        console.log(`🗑️ 删除已存在的文件: ${finalFileName}`);
-      }
-      
-      fs.renameSync(tempFinalPath, finalVideoPath);
-      console.log(`📁 文件已移动到: ${finalVideoPath}`);
-    } else {
-      throw new Error('处理后的视频文件不存在');
-    }
-
-    // 7. 生成播放地址 - 使用SERVER_HOST配置
-    const serverPort = process.env.PORT || 3000;
-    const serverHost = process.env.SERVER_HOST || 'localhost';
-    const playUrl = `http://${serverHost}:${serverPort}/api/video/download/${finalFileName}`;
-
-    // 8. 保存到数据库
-    const dbRecord = await saveOrUpdateVideoInDb(videoInfo, finalVideoPath, playUrl, userId, bilibiliAccountId);
-
-    return {
-      ...dbRecord,
-      message: "视频处理完成",
-      downloadMode,
-      qualityDesc: videoInfo.qualityDesc,
-      playUrl: playUrl
-    };
-  } catch (error) {
-    console.error(`❌ 处理视频请求失败:`, error);
-    throw error;
-  }
-}
-
-/**
- * 批量处理视频
- * @param {Object} options - 批量处理选项
- * @returns {Promise<Object>} 批量处理结果
- */
-async function batchProcessVideos(options) {
-  const {
-    urls,
-    userId,
-    cookieString,
-    quality = 80,
-    downloadMode = "auto",
-    bilibiliAccountId
-  } = options;
-  
-  const results = {
-    success: [],
-    failed: [],
-    total: urls.length
-  };
-  
-  for (let i = 0; i < urls.length; i++) {
-    const url = urls[i];
-    try {
-      console.log(`📦 批量处理进度: ${i + 1}/${urls.length} - ${url}`);
-      
-      const result = await processVideoRequest({
-        url,
-        userId,
-        cookieString,
-        quality,
-        downloadMode,
-        bilibiliAccountId
-      });
-      
-      results.success.push({
-        url,
-        result,
-        index: i + 1
-      });
-      
-      // 添加延迟避免请求过于频繁
-      if (i < urls.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-      
-    } catch (error) {
-      console.error(`❌ 批量处理第 ${i + 1} 个视频失败:`, error.message);
-      results.failed.push({
-        url,
-        error: error.message,
-        index: i + 1
-      });
-    }
-  }
-  
-  return results;
-}
-
-/**
- * 生成安全下载token
- * @param {string} fileName - 文件名
- * @param {string} userId - 用户ID
- * @param {number} expiresIn - 过期时间（秒），默认1小时
- * @returns {string} JWT token
- */
-function generateDownloadToken(fileName, userId, expiresIn = 3600) {
-  const payload = {
-    fileName,
-    userId,
-    type: 'download',
-    timestamp: Date.now()
-  };
-  
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
-}
-
-/**
- * 验证下载token
- * @param {string} token - JWT token
- * @returns {object|null} 解码后的payload或null
- */
-function verifyDownloadToken(token) {
-  try {
-    return jwt.verify(token, process.env.JWT_SECRET);
-  } catch (error) {
-    console.error('Token验证失败:', error.message);
-    return null;
-  }
-}
-
-/**
- * 生成临时下载链接
- * @param {string} fileName - 文件名
- * @param {string} userId - 用户ID
- * @returns {object} 包含下载链接和token的对象
- */
-function generateSecureDownloadLink(fileName, userId) {
-  const token = generateDownloadToken(fileName, userId, 3600); // 1小时有效期
-  const serverPort = process.env.PORT || 3000;
-  const serverHost = process.env.SERVER_HOST || 'localhost';
-  
-  return {
-    downloadUrl: `http://${serverHost}:${serverPort}/api/video/secure-download?token=${token}&file=${encodeURIComponent(fileName)}`,
-    token,
-    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString()
-  };
-}
-
-/**
- * 检查用户是否有权限下载指定文件
- * @param {string} fileName - 文件名
- * @param {string} userId - 用户ID
- * @returns {boolean} 是否有权限
- */
-async function checkDownloadPermission(fileName, userId) {
-  try {
-    // 从文件名提取BVID
-    const bvid = fileName.replace(/\.(mp4|mp3)$/, '');
-    
-    // 查询数据库确认用户是否有权限访问该视频
-    const [rows] = await db.execute(
-      'SELECT id FROM videos WHERE bvid = ? AND user_id = ?',
-      [bvid, userId]
-    );
-    
-    return rows.length > 0;
-  } catch (error) {
-    console.error('检查下载权限失败:', error);
-    return false;
-  }
-}
-
-/**
- * 安全文件下载处理
- * @param {string} fileName - 文件名
- * @param {object} req - Express请求对象
- * @param {object} res - Express响应对象
- */
-async function handleSecureDownload(fileName, req, res) {
-  try {
-    const filePath = path.join(VIDEO_DIR, fileName);
-    
-    // 检查文件是否存在
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({
-        code: 404,
-        message: '文件不存在'
-      });
-    }
-    
-    // 获取文件信息
-    const stat = fs.statSync(filePath);
-    const fileSize = stat.size;
-    
-    // 设置响应头，支持断点续传
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Content-Length', fileSize);
-    
-    // 处理Range请求（断点续传）
-    const range = req.headers.range;
-    if (range) {
-      const parts = range.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      const chunksize = (end - start) + 1;
-      
-      res.status(206);
-      res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-      res.setHeader('Content-Length', chunksize);
-      
-      const stream = fs.createReadStream(filePath, { start, end });
-      stream.pipe(res);
-    } else {
-      // 完整文件下载
-      const stream = fs.createReadStream(filePath);
-      stream.pipe(res);
-    }
-    
-  } catch (error) {
-    console.error('安全下载处理失败:', error);
-    res.status(500).json({
-      code: 500,
-      message: '下载失败'
-    });
-  }
-}
-
-module.exports = {
-  parseVideoInfo,
-  downloadFile,
-  mergeVideoAndAudio,
-  saveOrUpdateVideoInDb,
-  listAllVideos,
-  getUserVideos,
-  deleteVideo,
-  processVideoRequest,
-  batchProcessVideos,
-  extractBVID,
-  QUALITY_MAP,
-  generateDownloadToken,
-  verifyDownloadToken,
-  generateSecureDownloadLink,
-  checkDownloadPermission,
-  handleSecureDownload
-};
 const express = require("express");
 const router = express.Router();
 const bilibiliUtils = require("./bilibiliUtils");
@@ -2162,14 +975,52 @@ async function toggleBilibiliAccountStatus(userId, accountId, isActive) {
 /**
  * 删除B站账号
  * @param {number} userId - 用户ID
- * @param {number} accountId - 账号ID
+ * @param {string|number} accountIdentifier - 账号标识符（可以是主键ID或dedeuserid）
  */
-async function deleteBilibiliAccount(userId, accountId) {
+async function deleteBilibiliAccount(userId, accountIdentifier) {
   try {
-    await db.promise().query(
-      'DELETE FROM bilibili_accounts WHERE id = ? AND user_id = ?',
-      [accountId, userId]
+    console.log('删除账号参数:', { userId, accountIdentifier, userIdType: typeof userId, accountIdentifierType: typeof accountIdentifier });
+    
+    // 先尝试通过主键ID查询
+    let [existingAccount] = await db.promise().query(
+      'SELECT * FROM bilibili_accounts WHERE id = ?',
+      [accountIdentifier]
     );
+    
+    // 如果通过主键ID没找到，尝试通过dedeuserid查询
+    if (existingAccount.length === 0) {
+      [existingAccount] = await db.promise().query(
+        'SELECT * FROM bilibili_accounts WHERE dedeuserid = ?',
+        [accountIdentifier]
+      );
+    }
+    
+    console.log('查询到的账号:', existingAccount);
+    
+    if (existingAccount.length === 0) {
+      throw new Error(`账号 ${accountIdentifier} 不存在`);
+    }
+    
+    const account = existingAccount[0];
+    
+    if (account.user_id != userId) {
+      throw new Error(`无权限删除账号，账号属于用户ID ${account.user_id}，当前用户ID ${userId}`);
+    }
+    
+    // 使用主键ID进行删除
+    const [result] = await db.promise().query(
+      'DELETE FROM bilibili_accounts WHERE id = ? AND user_id = ?',
+      [account.id, userId]
+    );
+    
+    console.log('删除结果:', result);
+    
+    // 检查是否真正删除了数据
+    if (result.affectedRows === 0) {
+      throw new Error('删除操作未影响任何记录');
+    }
+    
+    return result;
   } catch (error) {
     console.error('删除B站账号失败:', error);
     throw error;
@@ -2261,15 +1112,34 @@ async function getBilibiliVideoInfo(bvid, cookieString) {
       videoUrl = playData.durl[0].url;
     }
 
+    // 返回完整的视频信息，包含所有可用字段
     return {
+      // 基本信息
+      aid: videoData.aid,
+      bvid: videoData.bvid,
+      cid: videoData.cid,
       title: videoData.title,
       description: videoData.desc,
-      duration: videoData.duration,
       pic: videoData.pic,
+      
+      // 时间信息
+      duration: videoData.duration,
+      pubdate: videoData.pubdate,
+      ctime: videoData.ctime,
+      
+      // 分区信息
+      tid: videoData.tid,
+      tname: videoData.tname,
+      copyright: videoData.copyright,
+      
+      // UP主信息
       owner: {
+        mid: videoData.owner.mid,
         name: videoData.owner.name,
-        mid: videoData.owner.mid
+        face: videoData.owner.face
       },
+      
+      // 统计信息
       stat: {
         view: videoData.stat.view,
         danmaku: videoData.stat.danmaku,
@@ -2277,14 +1147,47 @@ async function getBilibiliVideoInfo(bvid, cookieString) {
         favorite: videoData.stat.favorite,
         coin: videoData.stat.coin,
         share: videoData.stat.share,
-        like: videoData.stat.like
+        like: videoData.stat.like,
+        now_rank: videoData.stat.now_rank || 0,
+        his_rank: videoData.stat.his_rank || 0,
+        evaluation: videoData.stat.evaluation || ''
       },
+      
+      // 视频属性
+      videos: videoData.videos, // 分P数量
+      pages: videoData.pages || [],
+      subtitle: videoData.subtitle || {},
+      
+      // 权限和状态
+      state: videoData.state,
+      attribute: videoData.attribute,
+      
+      // 下载相关
       downloadUrls: {
         video: videoUrl,
         audio: audioUrl
       },
       quality: playData.quality || 80,
-      format: playData.format || 'mp4'
+      format: playData.format || 'mp4',
+      
+      // 其他信息
+      mission_id: videoData.mission_id || null,
+      redirect_url: videoData.redirect_url || null,
+      
+      // 标签信息
+      tag: videoData.tag || [],
+      
+      // 荣誉信息
+      honor_reply: videoData.honor_reply || {},
+      
+      // 用户权限
+      user_garb: videoData.user_garb || {},
+      
+      // 互动信息
+      elec: videoData.elec || null,
+      
+      // 合集信息
+      ugc_season: videoData.ugc_season || null
     };
   } catch (error) {
     console.error('获取B站视频信息失败:', error);
@@ -2301,6 +1204,1200 @@ module.exports = {
   deleteBilibiliAccount,
   validateBilibiliCookie,
   getBilibiliVideoInfo
+};
+// model/video/videoRouters.js
+
+const express = require("express");
+const router = express.Router();
+const videoUtils = require("./videoUtils");
+const bilibiliUtils = require("../bilibili/bilibiliUtils");
+const authorize = require("../auth/authUtils"); // 导入授权中间件
+
+/**
+ * @api {get} /api/video/list
+ * @description 获取所有已处理的视频列表
+ * @access Public
+ */
+router.get("/list", async (req, res) => {
+  try {
+    const videos = await videoUtils.listAllVideos();
+    res.status(200).json({
+      code: 200,
+      message: "成功获取视频列表",
+      data: videos,
+    });
+  } catch (error) {
+    res.status(500).json({
+      code: 500,
+      message: error.message || "获取视频列表失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {get} /api/video/user-list
+ * @description 获取当前用户处理的视频列表
+ * @access Protected - 需要用户登录
+ */
+router.get("/user-list", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const videos = await videoUtils.getUserVideos(userId);
+    res.status(200).json({
+      code: 200,
+      message: "成功获取用户视频列表",
+      data: videos,
+    });
+  } catch (error) {
+    res.status(500).json({
+      code: 500,
+      message: error.message || "获取用户视频列表失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/parse
+ * @description 解析B站视频信息（不下载，仅获取视频详情）
+ * @access Protected - 需要用户登录和B站账号
+ * @body { "url": "视频的URL或BVID", "quality": "清晰度(可选)" }
+ */
+router.post("/parse", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { url, quality = 80 } = req.body;
+    
+    if (!url || !url.trim()) {
+      return res.status(400).json({
+        code: 400,
+        message: "请提供有效的视频 URL",
+        data: null,
+      });
+    }
+
+    // 检查用户是否有活跃的B站账号
+    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
+    if (!bilibiliAccount) {
+      return res.status(400).json({
+        code: 400,
+        message: "请先登录B站账号",
+        data: null
+      });
+    }
+
+    console.log(`▶️ 开始解析视频: ${url}`);
+    const result = await videoUtils.parseVideoInfo(url, bilibiliAccount.cookie_string, quality);
+    console.log(`✅ 视频解析完成: ${result.title}`);
+    
+    res.status(200).json({
+      code: 200,
+      message: "视频解析成功",
+      data: result,
+    });
+  } catch (error) {
+    console.error(`❌ 解析视频失败:`, error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "解析视频失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/process
+ * @description 处理B站视频（解析、下载、合并、入库）
+ * @access Protected - 需要用户登录和B站账号
+ * @body { "url": "视频的URL或BVID", "quality": "清晰度(可选)", "downloadMode": "下载模式(可选)" }
+ */
+router.post("/process", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { url, quality = 80, downloadMode = "auto" } = req.body;
+    
+    if (!url || !url.trim()) {
+      return res.status(400).json({
+        code: 400,
+        message: "请提供有效的视频 URL",
+        data: null,
+      });
+    }
+
+    // 检查用户是否有活跃的B站账号
+    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
+    if (!bilibiliAccount) {
+      return res.status(400).json({
+        code: 400,
+        message: "请先登录B站账号",
+        data: null
+      });
+    }
+
+    console.log(`▶️ 开始处理视频请求: ${url}`);
+    const result = await videoUtils.processVideoRequest({
+      url,
+      userId,
+      cookieString: bilibiliAccount.cookie_string,
+      quality,
+      downloadMode,
+      bilibiliAccountId: bilibiliAccount.id
+    });
+    console.log(`✅ 视频处理完成: ${result.title}`);
+    
+    res.status(201).json({
+      code: 201,
+      message: "视频处理成功并已入库",
+      data: result,
+    });
+  } catch (error) {
+    console.error(`❌ 处理视频失败:`, error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "处理视频时发生未知错误",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/batch-process
+ * @description 批量处理B站视频
+ * @access Protected - 需要用户登录和B站账号
+ * @body { "urls": ["视频URL数组"], "quality": "清晰度(可选)", "downloadMode": "下载模式(可选)" }
+ */
+router.post("/batch-process", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { urls, quality = 80, downloadMode = "auto" } = req.body;
+    
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({
+        code: 400,
+        message: "请提供有效的视频 URL 数组",
+        data: null,
+      });
+    }
+
+    if (urls.length > 10) {
+      return res.status(400).json({
+        code: 400,
+        message: "批量处理最多支持10个视频",
+        data: null,
+      });
+    }
+
+    // 检查用户是否有活跃的B站账号
+    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
+    if (!bilibiliAccount) {
+      return res.status(400).json({
+        code: 400,
+        message: "请先登录B站账号",
+        data: null
+      });
+    }
+
+    console.log(`▶️ 开始批量处理 ${urls.length} 个视频`);
+    const results = await videoUtils.batchProcessVideos({
+      urls,
+      userId,
+      cookieString: bilibiliAccount.cookie_string,
+      quality,
+      downloadMode,
+      bilibiliAccountId: bilibiliAccount.id
+    });
+    console.log(`✅ 批量处理完成，成功: ${results.success.length}, 失败: ${results.failed.length}`);
+    
+    res.status(200).json({
+      code: 200,
+      message: `批量处理完成，成功: ${results.success.length}, 失败: ${results.failed.length}`,
+      data: results,
+    });
+  } catch (error) {
+    console.error(`❌ 批量处理视频失败:`, error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "批量处理视频失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {delete} /api/video/:id
+ * @description 删除视频记录和文件
+ * @access Protected - 需要用户登录
+ */
+router.delete("/:id", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { id } = req.params;
+    const { deleteFile = false } = req.query;
+    
+    await videoUtils.deleteVideo(id, userId, deleteFile === 'true');
+    
+    res.status(200).json({
+      code: 200,
+      message: "视频删除成功",
+      data: null,
+    });
+  } catch (error) {
+    console.error(`❌ 删除视频失败:`, error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "删除视频失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/generate-download-link
+ * @description 生成安全下载链接
+ * @access Protected - 需要用户登录
+ */
+router.post("/generate-download-link", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const { fileName } = req.body;
+    const userId = req.user.uid || req.user.id;
+    
+    if (!fileName) {
+      return res.status(400).json({
+        code: 400,
+        message: "文件名不能为空",
+        data: null,
+      });
+    }
+    
+    // 检查用户是否有权限下载该文件
+    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
+    if (!hasPermission) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权限下载该文件",
+        data: null,
+      });
+    }
+    
+    // 生成安全下载链接
+    const downloadInfo = videoUtils.generateSecureDownloadLink(fileName, userId);
+    
+    res.status(200).json({
+      code: 200,
+      message: "下载链接生成成功",
+      data: downloadInfo,
+    });
+  } catch (error) {
+    console.error("生成下载链接失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "生成下载链接失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {get} /api/video/secure-download
+ * @description 安全文件下载（支持断点续传）
+ * @access Public - 通过token验证
+ */
+router.get("/secure-download", async (req, res) => {
+  try {
+    const { token, file } = req.query;
+    
+    if (!token || !file) {
+      return res.status(400).json({
+        code: 400,
+        message: "缺少必要参数",
+        data: null,
+      });
+    }
+    
+    // 验证token
+    const payload = videoUtils.verifyDownloadToken(token);
+    if (!payload) {
+      return res.status(401).json({
+        code: 401,
+        message: "下载链接已过期或无效",
+        data: null,
+      });
+    }
+    
+    // 验证文件名是否匹配
+    if (payload.fileName !== file) {
+      return res.status(403).json({
+        code: 403,
+        message: "文件访问权限验证失败",
+        data: null,
+      });
+    }
+    
+    // 再次检查用户权限
+    const hasPermission = await videoUtils.checkDownloadPermission(file, payload.userId);
+    if (!hasPermission) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权限下载该文件",
+        data: null,
+      });
+    }
+    
+    // 处理安全下载
+    await videoUtils.handleSecureDownload(file, req, res);
+    
+  } catch (error) {
+    console.error("安全下载失败:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        code: 500,
+        message: error.message || "下载失败",
+        data: null,
+      });
+    }
+  }
+});
+
+/**
+ * @api {get} /api/video/download/:bvid
+ * @description 直接下载视频（兼容旧版本）
+ * @access Protected - 需要用户登录
+ */
+router.get("/download/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const { bvid } = req.params;
+    const userId = req.user.uid || req.user.id;
+    
+    // 构造文件名
+    const fileName = `${bvid}.mp4`;
+    
+    // 检查用户是否有权限下载该文件
+    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
+    if (!hasPermission) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权限下载该文件",
+        data: null,
+      });
+    }
+    
+    // 处理安全下载
+    await videoUtils.handleSecureDownload(fileName, req, res);
+    
+  } catch (error) {
+    console.error("直接下载失败:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        code: 500,
+        message: error.message || "下载失败",
+        data: null,
+      });
+    }
+  }
+});
+
+module.exports = router;
+// model/video/videoUtils.js
+
+const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
+const { spawn } = require("child_process");
+const { v4: uuidv4 } = require("uuid");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const db = require("../../config/db").promise();
+const bilibiliUtils = require("../bilibili/bilibiliUtils");
+
+// 配置路径
+const DOWNLOAD_DIR = path.join(__dirname, "../../downloads"); // 临时下载目录
+const VIDEO_DIR = path.join(__dirname, "../../videos"); // 最终视频存储目录
+const FFMPEG_PATH = "ffmpeg"; // FFmpeg 可执行文件路径，确保已安装并在 PATH 中
+
+// 确保目录存在
+if (!fs.existsSync(DOWNLOAD_DIR)) {
+  fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+  console.log(`📁 创建临时下载目录: ${DOWNLOAD_DIR}`);
+}
+
+if (!fs.existsSync(VIDEO_DIR)) {
+  fs.mkdirSync(VIDEO_DIR, { recursive: true });
+  console.log(`📁 创建视频存储目录: ${VIDEO_DIR}`);
+}
+
+// 视频质量映射
+const QUALITY_MAP = {
+  120: "4K 超清",
+  116: "1080P60 高清",
+  112: "1080P+ 高清",
+  80: "1080P 高清",
+  74: "720P60 高清",
+  64: "720P 高清",
+  32: "480P 清晰",
+  16: "360P 流畅"
+};
+
+/**
+ * 提取BVID从URL
+ * @param {string} url - 视频URL或BVID
+ * @returns {string} BVID
+ */
+function extractBVID(url) {
+  if (url.startsWith('BV')) {
+    return url;
+  }
+  const bvidMatch = url.match(/BV[a-zA-Z0-9]+/);
+  if (bvidMatch) {
+    return bvidMatch[0];
+  }
+  throw new Error('无法从URL中提取BVID');
+}
+
+/**
+ * 解析B站视频信息（使用B站账号Cookie）
+ * @param {string} url - 视频URL或BVID
+ * @param {string} cookieString - B站账号Cookie
+ * @param {number} quality - 视频质量
+ * @returns {Promise<Object>} 视频信息
+ */
+async function parseVideoInfo(url, cookieString, quality = 80) {
+  try {
+    const bvid = extractBVID(url);
+    console.log(`🔍 正在解析视频信息: ${bvid}`);
+    
+    // 获取视频信息和下载链接
+    const videoInfo = await bilibiliUtils.getBilibiliVideoInfo(bvid, cookieString);
+    
+    const result = {
+      bvid: bvid,
+      aid: videoInfo.aid || null,
+      title: videoInfo.title,
+      description: videoInfo.description,
+      duration: videoInfo.duration,
+      view: videoInfo.stat.view,
+      like: videoInfo.stat.like,
+      coin: videoInfo.stat.coin,
+      share: videoInfo.stat.share,
+      reply: videoInfo.stat.reply,
+      favorite: videoInfo.stat.favorite,
+      owner: {
+        mid: videoInfo.owner.mid,
+        name: videoInfo.owner.name,
+        face: videoInfo.owner.face || null
+      },
+      pubdate: videoInfo.pubdate || null,
+      pic: videoInfo.pic,
+      pages: videoInfo.pages || [],
+      quality: quality,
+      qualityDesc: QUALITY_MAP[quality] || '未知画质',
+      downloadUrls: videoInfo.downloadUrls,
+      videoUrl: videoInfo.downloadUrls.video,
+      audioUrl: videoInfo.downloadUrls.audio,
+      fileSize: null // 文件大小需要在下载时获取
+    };
+    
+    console.log(`✅ 视频信息解析完成: ${result.title}`);
+    return result;
+  } catch (error) {
+    console.error(`❌ 解析视频信息失败:`, error.message);
+    throw new Error(`解析视频信息失败: ${error.message}`);
+  }
+}
+
+/**
+ * 下载文件（支持进度回调）
+ * @param {string} url - 下载链接
+ * @param {string} filePath - 保存路径
+ * @param {string} cookieString - B站Cookie
+ * @param {Function} progressCallback - 进度回调函数
+ * @returns {Promise<void>}
+ */
+async function downloadFile(url, filePath, cookieString, progressCallback) {
+  try {
+    console.log(`⬇️ 开始下载文件: ${path.basename(filePath)}`);
+    
+    const response = await axios({
+      method: "GET",
+      url: url,
+      responseType: "stream",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.bilibili.com/",
+        "Cookie": cookieString,
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+      },
+      timeout: 30000
+    });
+
+    const totalLength = parseInt(response.headers['content-length'], 10);
+    let downloadedLength = 0;
+
+    const writer = fs.createWriteStream(filePath);
+    
+    response.data.on('data', (chunk) => {
+      downloadedLength += chunk.length;
+      if (progressCallback && totalLength) {
+        const progress = (downloadedLength / totalLength * 100).toFixed(2);
+        progressCallback(progress, downloadedLength, totalLength);
+      }
+    });
+    
+    response.data.pipe(writer);
+
+    return new Promise((resolve, reject) => {
+      writer.on("finish", () => {
+        console.log(`✅ 文件下载完成: ${path.basename(filePath)}`);
+        resolve();
+      });
+      writer.on("error", (error) => {
+        console.error(`❌ 文件下载失败: ${path.basename(filePath)}`, error);
+        reject(error);
+      });
+    });
+  } catch (error) {
+    console.error(`❌ 下载文件失败: ${path.basename(filePath)}`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * 使用 FFmpeg 合并视频和音频（支持进度回调）
+ * @param {string} videoPath - 视频文件路径
+ * @param {string} audioPath - 音频文件路径
+ * @param {string} outputPath - 输出文件路径
+ * @param {Function} progressCallback - 进度回调函数
+ * @returns {Promise<void>}
+ */
+function mergeVideoAndAudio(videoPath, audioPath, outputPath, progressCallback) {
+  return new Promise((resolve, reject) => {
+    console.log(`🔧 开始合并视频和音频: ${path.basename(outputPath)}`);
+
+    const ffmpeg = spawn(FFMPEG_PATH, [
+      "-i", videoPath,
+      "-i", audioPath,
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-strict", "experimental",
+      "-y", // 覆盖输出文件
+      outputPath,
+    ]);
+
+    let duration = null;
+    
+    ffmpeg.stderr.on("data", (data) => {
+      const output = data.toString();
+      
+      // 提取总时长
+      if (!duration) {
+        const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+        if (durationMatch) {
+          const hours = parseInt(durationMatch[1]);
+          const minutes = parseInt(durationMatch[2]);
+          const seconds = parseInt(durationMatch[3]);
+          duration = hours * 3600 + minutes * 60 + seconds;
+        }
+      }
+      
+      // 提取当前进度
+      if (duration && progressCallback) {
+        const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+        if (timeMatch) {
+          const hours = parseInt(timeMatch[1]);
+          const minutes = parseInt(timeMatch[2]);
+          const seconds = parseInt(timeMatch[3]);
+          const currentTime = hours * 3600 + minutes * 60 + seconds;
+          const progress = (currentTime / duration * 100).toFixed(2);
+          progressCallback(progress, currentTime, duration);
+        }
+      }
+    });
+
+    ffmpeg.on("close", (code) => {
+      if (code === 0) {
+        console.log(`✅ 视频合并完成: ${path.basename(outputPath)}`);
+        resolve();
+      } else {
+        console.error(`❌ FFmpeg 进程退出，代码: ${code}`);
+        reject(new Error(`FFmpeg 合并失败，退出代码: ${code}`));
+      }
+    });
+
+    ffmpeg.on("error", (error) => {
+      console.error(`❌ FFmpeg 启动失败:`, error);
+      reject(error);
+    });
+  });
+}
+
+/**
+ * 将视频信息保存到数据库
+ * @param {Object} videoInfo - 视频信息
+ * @param {string} filePath - 文件路径
+ * @param {string} playUrl - 播放地址
+ * @param {number} userId - 用户ID
+ * @param {number} bilibiliAccountId - B站账号ID
+ * @returns {Promise<Object>} 数据库记录
+ */
+async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilibiliAccountId) {
+  try {
+    console.log(`💾 保存视频信息到数据库: ${videoInfo.title}`);
+
+    // 检查视频是否已存在（根据bvid）
+    const [existingVideos] = await db.execute(
+      "SELECT * FROM videos WHERE bvid = ?",
+      [videoInfo.bvid]
+    );
+
+    if (existingVideos.length > 0) {
+      // 更新现有记录
+      await db.execute(
+        `UPDATE videos SET 
+         title = ?, pic = ?, view = ?, danmaku = ?, \`like\` = ?, 
+         coin = ?, favorite = ?, share = ?, reply = ?, 
+         name = ?, face = ?, pubdate = ?, 
+         quality = ?, \`desc\` = ?, duration = ?, aid = ?, download_link = ?,
+         cid = ?, tname = ?, current_viewers = ?
+         WHERE bvid = ?`,
+        [
+          videoInfo.title,
+          videoInfo.pic || "",
+          videoInfo.stat?.view || 0,
+          videoInfo.stat?.danmaku || 0,
+          videoInfo.stat?.like || 0,
+          videoInfo.stat?.coin || 0,
+          videoInfo.stat?.favorite || 0,
+          videoInfo.stat?.share || 0,
+          videoInfo.stat?.reply || 0,
+          videoInfo.owner?.name || "未知",
+          videoInfo.owner?.face || "",
+          videoInfo.pubdate || "",
+          videoInfo.quality || 80,
+          videoInfo.description || "",
+          videoInfo.duration || 0,
+          videoInfo.aid || "",
+          playUrl,
+          videoInfo.cid || "",
+          videoInfo.tname || "",
+          videoInfo.stat?.now_rank || 0,
+          videoInfo.bvid
+        ]
+      );
+      
+      console.log(`✅ 视频信息已更新: ${videoInfo.title}`);
+      return { 
+        id: existingVideos[0].id, 
+        updated: true,
+        title: videoInfo.title,
+        bvid: videoInfo.bvid,
+        filePath: filePath,
+        playUrl: playUrl
+      };
+    } else {
+      // 插入新记录
+      const [result] = await db.execute(
+        `INSERT INTO videos (
+          bvid, aid, title, pic, view, danmaku, \`like\`, coin, favorite, share, reply,
+          name, face, pubdate, quality, \`desc\`, duration, download_link, cid, tname, current_viewers
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          videoInfo.bvid,
+          videoInfo.aid || "",
+          videoInfo.title,
+          videoInfo.pic || "",
+          videoInfo.stat?.view || 0,
+          videoInfo.stat?.danmaku || 0,
+          videoInfo.stat?.like || 0,
+          videoInfo.stat?.coin || 0,
+          videoInfo.stat?.favorite || 0,
+          videoInfo.stat?.share || 0,
+          videoInfo.stat?.reply || 0,
+          videoInfo.owner?.name || "未知",
+          videoInfo.owner?.face || "",
+          videoInfo.pubdate || "",
+          videoInfo.quality || 80,
+          videoInfo.description || "",
+          videoInfo.duration || 0,
+          playUrl,
+          videoInfo.cid || "",
+          videoInfo.tname || "",
+          videoInfo.stat?.now_rank || 0
+        ]
+      );
+      
+      console.log(`✅ 视频信息已保存: ${videoInfo.title}`);
+      return { 
+        id: result.insertId, 
+        updated: false,
+        title: videoInfo.title,
+        bvid: videoInfo.bvid,
+        filePath: filePath,
+        playUrl: playUrl
+      };
+    }
+  } catch (error) {
+    console.error('❌ 保存视频信息到数据库失败:', error);
+    throw error;
+  }
+}
+
+
+/**
+ * 获取所有视频列表
+ * @returns {Promise<Array>} 视频列表
+ */
+async function listAllVideos() {
+  try {
+    const [videos] = await db.execute(
+      `SELECT * FROM videos ORDER BY id DESC`
+    );
+    return videos;
+  } catch (error) {
+    console.error(`❌ 获取视频列表失败:`, error);
+    throw error;
+  }
+}
+
+/**
+ * 获取用户的视频列表
+ * @param {number} userId - 用户ID（暂时不使用，返回所有视频）
+ * @returns {Promise<Array>} 用户视频列表
+ */
+async function getUserVideos(userId) {
+  try {
+    // 由于当前表结构没有user_id字段，暂时返回所有视频
+    const [videos] = await db.execute(
+      `SELECT * FROM videos ORDER BY id DESC`
+    );
+    return videos;
+  } catch (error) {
+    console.error(`❌ 获取用户视频列表失败:`, error);
+    throw error;
+  }
+}
+
+/**
+ * 删除视频记录和文件
+ * @param {number} videoId - 视频ID
+ * @param {number} userId - 用户ID（暂时不使用）
+ * @param {boolean} deleteFile - 是否删除文件
+ * @returns {Promise<void>}
+ */
+async function deleteVideo(videoId, userId, deleteFile = false) {
+  try {
+    // 获取视频信息
+    const [videos] = await db.execute(
+      "SELECT * FROM videos WHERE id = ?",
+      [videoId]
+    );
+    
+    if (videos.length === 0) {
+      throw new Error('视频不存在');
+    }
+    
+    const video = videos[0];
+    
+    // 删除数据库记录
+    await db.execute("DELETE FROM videos WHERE id = ?", [videoId]);
+    
+    // 删除文件
+    if (deleteFile && video.file_path && fs.existsSync(video.file_path)) {
+      fs.unlinkSync(video.file_path);
+      console.log(`🗑️ 删除视频文件: ${video.file_path}`);
+    }
+    
+    console.log(`✅ 删除视频记录: ${video.title}`);
+  } catch (error) {
+    console.error(`❌ 删除视频失败:`, error);
+    throw error;
+  }
+}
+
+/**
+ * 处理视频请求的主函数
+ * @param {Object} options - 处理选项
+ * @returns {Promise<Object>} 处理结果
+ */
+async function processVideoRequest(options) {
+  const {
+    url,
+    userId,
+    cookieString,
+    quality = 80,
+    downloadMode = "auto",
+    bilibiliAccountId
+  } = options;
+  
+  try {
+    // 0. 提取BVID进行预检查
+    const bvid = extractBVID(url);
+    if (!bvid) {
+      throw new Error('无法从URL中提取BVID');
+    }
+    
+    // 1. 检查数据库和文件是否已存在（优化：避免重复解析）
+    const finalFileName = `${bvid}.mp4`;
+    const finalVideoPath = path.join(VIDEO_DIR, finalFileName);
+    
+    // 检查数据库中是否已有记录
+    const [existingRecords] = await db.execute(
+      'SELECT * FROM videos WHERE bvid = ?',
+      [bvid]
+    );
+    
+    // 检查文件是否存在
+    const fileExists = fs.existsSync(finalVideoPath);
+    
+    if (existingRecords.length > 0 && fileExists) {
+      console.log(`✅ 发现已存在的视频记录和文件: ${bvid}`);
+      
+      // 只解析基本信息用于更新数据库
+      const videoInfo = await parseVideoInfo(url, cookieString, quality);
+      
+      // 生成播放地址
+      const serverPort = process.env.PORT || 3000;
+      const serverHost = process.env.SERVER_HOST || 'localhost';
+      const playUrl = `http://${serverHost}:${serverPort}/api/video/download/${finalFileName}`;
+      
+      // 更新数据库记录（保持文件路径不变）
+      const existingRecord = existingRecords[0];
+      await db.execute(
+        `UPDATE videos SET 
+         title = ?, pic = ?, view = ?, duration = ?, 
+         download_link = ? 
+         WHERE id = ?`,
+        [
+          videoInfo.title,
+          videoInfo.pic,
+          videoInfo.view,
+          videoInfo.duration,
+          playUrl,
+          existingRecord.id
+        ]
+      );
+      
+      console.log(`🔄 已更新现有视频记录: ${videoInfo.title}`);
+      
+      return {
+        id: existingRecord.id,
+        updated: true,
+        title: videoInfo.title,
+        bvid: bvid,
+        filePath: finalVideoPath,
+        playUrl: playUrl,
+        message: "视频已存在，仅更新数据库信息",
+        downloadMode,
+        qualityDesc: videoInfo.qualityDesc,
+        skippedProcessing: true // 标记跳过了处理过程
+      };
+    }
+    
+    console.log(`🆕 开始处理新视频或重新处理: ${bvid}`);
+    
+    // 2. 解析视频信息（完整解析用于下载）
+    const videoInfo = await parseVideoInfo(url, cookieString, quality);
+
+    // 3. 创建文件名和路径
+    const uniqueId = uuidv4().substring(0, 8);
+    const tempVideoFileName = `${videoInfo.bvid}_${uniqueId}_video.mp4`;
+    const tempAudioFileName = `${videoInfo.bvid}_${uniqueId}_audio.mp3`;
+    const tempOutputFileName = `${videoInfo.bvid}_${uniqueId}_temp.mp4`;
+    // finalFileName 已在前面声明过，这里不需要重复声明
+
+    const tempVideoPath = path.join(DOWNLOAD_DIR, tempVideoFileName);
+    const tempAudioPath = path.join(DOWNLOAD_DIR, tempAudioFileName);
+    const tempOutputPath = path.join(DOWNLOAD_DIR, tempOutputFileName);
+    // finalVideoPath 也已在前面声明过，这里不需要重复声明
+
+    // 4. 下载视频和音频
+    console.log(`📥 开始下载视频和音频...`);
+    
+    const downloadPromises = [];
+    
+    if (downloadMode === "video" || downloadMode === "auto") {
+      downloadPromises.push(
+        downloadFile(videoInfo.videoUrl, tempVideoPath, cookieString, (progress) => {
+          console.log(`📹 视频下载进度: ${progress}%`);
+        })
+      );
+    }
+    
+    if (downloadMode === "audio" || downloadMode === "auto") {
+      downloadPromises.push(
+        downloadFile(videoInfo.audioUrl, tempAudioPath, cookieString, (progress) => {
+          console.log(`🎵 音频下载进度: ${progress}%`);
+        })
+      );
+    }
+    
+    await Promise.all(downloadPromises);
+
+    // 5. 合并视频和音频（如果都下载了）
+    let tempFinalPath = tempOutputPath;
+    if (downloadMode === "auto" && fs.existsSync(tempVideoPath) && fs.existsSync(tempAudioPath)) {
+      console.log(`🔧 开始合并视频和音频: ${finalFileName}`);
+      await mergeVideoAndAudio(tempVideoPath, tempAudioPath, tempOutputPath, (progress) => {
+        console.log(`🔧 合并进度: ${progress}%`);
+      });
+      
+      // 清理临时文件
+      try {
+        fs.unlinkSync(tempVideoPath);
+        fs.unlinkSync(tempAudioPath);
+        console.log(`🗑️ 清理临时文件完成`);
+      } catch (cleanupError) {
+        console.warn(`⚠️ 清理临时文件失败:`, cleanupError.message);
+      }
+    } else if (downloadMode === "video" && fs.existsSync(tempVideoPath)) {
+      tempFinalPath = tempVideoPath;
+    } else if (downloadMode === "audio" && fs.existsSync(tempAudioPath)) {
+      tempFinalPath = tempAudioPath;
+    }
+
+    // 6. 移动文件到最终目录
+    if (fs.existsSync(tempFinalPath)) {
+      // 如果最终文件已存在，先删除
+      if (fs.existsSync(finalVideoPath)) {
+        fs.unlinkSync(finalVideoPath);
+        console.log(`🗑️ 删除已存在的文件: ${finalFileName}`);
+      }
+      
+      fs.renameSync(tempFinalPath, finalVideoPath);
+      console.log(`📁 文件已移动到: ${finalVideoPath}`);
+    } else {
+      throw new Error('处理后的视频文件不存在');
+    }
+
+    // 7. 生成播放地址 - 使用SERVER_HOST配置
+    const serverPort = process.env.PORT || 3000;
+    const serverHost = process.env.SERVER_HOST || 'localhost';
+    const playUrl = `http://${serverHost}:${serverPort}/api/video/download/${finalFileName}`;
+
+    // 8. 保存到数据库
+    const dbRecord = await saveOrUpdateVideoInDb(videoInfo, finalVideoPath, playUrl, userId, bilibiliAccountId);
+
+    return {
+      ...dbRecord,
+      message: "视频处理完成",
+      downloadMode,
+      qualityDesc: videoInfo.qualityDesc,
+      playUrl: playUrl
+    };
+  } catch (error) {
+    console.error(`❌ 处理视频请求失败:`, error);
+    throw error;
+  }
+}
+
+/**
+ * 批量处理视频
+ * @param {Object} options - 批量处理选项
+ * @returns {Promise<Object>} 批量处理结果
+ */
+async function batchProcessVideos(options) {
+  const {
+    urls,
+    userId,
+    cookieString,
+    quality = 80,
+    downloadMode = "auto",
+    bilibiliAccountId
+  } = options;
+  
+  const results = {
+    success: [],
+    failed: [],
+    total: urls.length
+  };
+  
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    try {
+      console.log(`📦 批量处理进度: ${i + 1}/${urls.length} - ${url}`);
+      
+      const result = await processVideoRequest({
+        url,
+        userId,
+        cookieString,
+        quality,
+        downloadMode,
+        bilibiliAccountId
+      });
+      
+      results.success.push({
+        url,
+        result,
+        index: i + 1
+      });
+      
+      // 添加延迟避免请求过于频繁
+      if (i < urls.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      
+    } catch (error) {
+      console.error(`❌ 批量处理第 ${i + 1} 个视频失败:`, error.message);
+      results.failed.push({
+        url,
+        error: error.message,
+        index: i + 1
+      });
+    }
+  }
+  
+  return results;
+}
+
+/**
+ * 生成安全下载token
+ * @param {string} fileName - 文件名
+ * @param {string} userId - 用户ID
+ * @param {number} expiresIn - 过期时间（秒），默认1小时
+ * @returns {string} JWT token
+ */
+function generateDownloadToken(fileName, userId, expiresIn = 3600) {
+  const payload = {
+    fileName,
+    userId,
+    type: 'download',
+    timestamp: Date.now()
+  };
+  
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+}
+
+/**
+ * 验证下载token
+ * @param {string} token - JWT token
+ * @returns {object|null} 解码后的payload或null
+ */
+function verifyDownloadToken(token) {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    console.error('Token验证失败:', error.message);
+    return null;
+  }
+}
+
+/**
+ * 生成临时下载链接
+ * @param {string} fileName - 文件名
+ * @param {string} userId - 用户ID
+ * @returns {object} 包含下载链接和token的对象
+ */
+function generateSecureDownloadLink(fileName, userId) {
+  const token = generateDownloadToken(fileName, userId, 3600); // 1小时有效期
+  const serverPort = process.env.PORT || 3000;
+  const serverHost = process.env.SERVER_HOST || 'localhost';
+  
+  return {
+    downloadUrl: `http://${serverHost}:${serverPort}/api/video/secure-download?token=${token}&file=${encodeURIComponent(fileName)}`,
+    token,
+    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString()
+  };
+}
+
+/**
+ * 检查用户是否有权限下载指定文件
+ * @param {string} fileName - 文件名
+ * @param {string} userId - 用户ID
+ * @returns {boolean} 是否有权限
+ */
+async function checkDownloadPermission(fileName, userId) {
+  try {
+    // 从文件名提取BVID
+    const bvid = fileName.replace(/\.(mp4|mp3)$/, '');
+    
+    // 查询数据库确认视频是否存在（由于videos表没有user_id字段，这里只检查视频是否存在）
+    const [rows] = await db.execute(
+      'SELECT id FROM videos WHERE bvid = ?',
+      [bvid]
+    );
+    
+    return rows.length > 0;
+  } catch (error) {
+    console.error('检查下载权限失败:', error);
+    return false;
+  }
+}
+
+/**
+ * 安全文件下载处理
+ * @param {string} fileName - 文件名
+ * @param {object} req - Express请求对象
+ * @param {object} res - Express响应对象
+ */
+async function handleSecureDownload(fileName, req, res) {
+  try {
+    const filePath = path.join(VIDEO_DIR, fileName);
+    
+    // 检查文件是否存在
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        code: 404,
+        message: '文件不存在'
+      });
+    }
+    
+    // 获取文件信息
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    
+    // 设置响应头，支持断点续传
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Length', fileSize);
+    
+    // 处理Range请求（断点续传）
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = (end - start) + 1;
+      
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+      res.setHeader('Content-Length', chunksize);
+      
+      const stream = fs.createReadStream(filePath, { start, end });
+      stream.pipe(res);
+    } else {
+      // 完整文件下载
+      const stream = fs.createReadStream(filePath);
+      stream.pipe(res);
+    }
+    
+  } catch (error) {
+    console.error('安全下载处理失败:', error);
+    res.status(500).json({
+      code: 500,
+      message: '下载失败'
+    });
+  }
+}
+
+module.exports = {
+  parseVideoInfo,
+  downloadFile,
+  mergeVideoAndAudio,
+  saveOrUpdateVideoInDb,
+  listAllVideos,
+  getUserVideos,
+  deleteVideo,
+  processVideoRequest,
+  batchProcessVideos,
+  extractBVID,
+  QUALITY_MAP,
+  generateDownloadToken,
+  verifyDownloadToken,
+  generateSecureDownloadLink,
+  checkDownloadPermission,
+  handleSecureDownload
 };
 // app.js
 const express = require("express");

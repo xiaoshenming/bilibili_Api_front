@@ -6,7 +6,7 @@ import {
 import { 
   QrcodeOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined,
   SecurityScanOutlined, MobileOutlined, HistoryOutlined, SafetyCertificateOutlined,
-  ClockCircleOutlined
+  ClockCircleOutlined, WifiOutlined
 } from '@ant-design/icons';
 import { useModel, request } from '@umijs/max';
 import dayjs from 'dayjs';
