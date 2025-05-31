@@ -58,6 +58,18 @@ export default [
     component: './Bilibili',
   },
   {
+    name: 'video-player',
+    icon: 'video-camera',
+    path: '/video-player',
+    component: './VideoPlayer',
+  },
+  {
+    name: 'parse-manager',
+    icon: 'cloud-download',
+    path: '/parse-manager',
+    component: './ParseManager',
+  },
+  {
     path: '/',
     redirect: '/welcome',
   },
