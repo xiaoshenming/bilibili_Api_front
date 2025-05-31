@@ -605,7 +605,7 @@ const VideoPlayer: React.FC = () => {
               controls
               width="100%"
               height="500"
-              poster={selectedVideo.thumbnail_url}
+              poster={selectedVideo.pic}
               style={{ borderRadius: 8 }}
             >
               <source src={selectedVideo.play_url} type="video/mp4" />
@@ -613,11 +613,11 @@ const VideoPlayer: React.FC = () => {
             </video>
             <div style={{ marginTop: 16 }}>
               <Descriptions column={2} size="small">
-                <Descriptions.Item label="作者">{selectedVideo.author}</Descriptions.Item>
+                <Descriptions.Item label="作者">{selectedVideo.name}</Descriptions.Item>
                 <Descriptions.Item label="时长">{formatDuration(selectedVideo.duration)}</Descriptions.Item>
-                <Descriptions.Item label="播放量">{selectedVideo.view_count?.toLocaleString()}</Descriptions.Item>
-                <Descriptions.Item label="点赞数">{selectedVideo.like_count?.toLocaleString()}</Descriptions.Item>
-                <Descriptions.Item label="发布时间">{dayjs(selectedVideo.publish_time).format('YYYY-MM-DD')}</Descriptions.Item>
+                <Descriptions.Item label="播放量">{selectedVideo.view?.toLocaleString()}</Descriptions.Item>
+                <Descriptions.Item label="点赞数">{selectedVideo.like?.toLocaleString()}</Descriptions.Item>
+                <Descriptions.Item label="发布时间">{selectedVideo.pubdate ? dayjs(selectedVideo.pubdate).format('YYYY-MM-DD') : '-'}</Descriptions.Item>
                 <Descriptions.Item label="画质">{getQualityTag(selectedVideo.quality)}</Descriptions.Item>
               </Descriptions>
               {selectedVideo.description && (
@@ -650,7 +650,7 @@ const VideoPlayer: React.FC = () => {
             <Row gutter={16}>
               <Col span={8}>
                 <Image
-                  src={selectedVideo.thumbnail_url}
+                  src={selectedVideo.pic}
                   alt={selectedVideo.title}
                   width="100%"
                   style={{ borderRadius: 8 }}
@@ -663,8 +663,8 @@ const VideoPlayer: React.FC = () => {
                   <Descriptions.Item label="AID">{selectedVideo.aid}</Descriptions.Item>
                   <Descriptions.Item label="作者">
                     <Space>
-                      <Avatar src={selectedVideo.author_face} size="small" />
-                      {selectedVideo.author}
+                      <Avatar src={selectedVideo.face} size="small" />
+                      {selectedVideo.name}
                     </Space>
                   </Descriptions.Item>
                   <Descriptions.Item label="时长">{formatDuration(selectedVideo.duration)}</Descriptions.Item>
@@ -681,18 +681,18 @@ const VideoPlayer: React.FC = () => {
               <Col span={12}>
                 <Title level={5}>播放数据</Title>
                 <Space direction="vertical" style={{ width: '100%' }}>
-                  <div><EyeOutlined /> 播放量: {selectedVideo.view_count?.toLocaleString()}</div>
-                  <div><LikeOutlined /> 点赞数: {selectedVideo.like_count?.toLocaleString()}</div>
-                  <div><HeartOutlined /> 收藏数: {selectedVideo.favorite_count?.toLocaleString()}</div>
-                  <div><ShareAltOutlined /> 分享数: {selectedVideo.share_count?.toLocaleString()}</div>
+                  <div><EyeOutlined /> 播放量: {selectedVideo.view?.toLocaleString()}</div>
+                  <div><LikeOutlined /> 点赞数: {selectedVideo.like?.toLocaleString()}</div>
+                  <div><HeartOutlined /> 收藏数: {selectedVideo.favorite?.toLocaleString()}</div>
+                  <div><ShareAltOutlined /> 分享数: {selectedVideo.share?.toLocaleString()}</div>
                 </Space>
               </Col>
               <Col span={12}>
                 <Title level={5}>时间信息</Title>
                 <Space direction="vertical" style={{ width: '100%' }}>
-                  <div><CalendarOutlined /> 发布时间: {dayjs(selectedVideo.publish_time).format('YYYY-MM-DD HH:mm')}</div>
-                  <div><CalendarOutlined /> 解析时间: {dayjs(selectedVideo.created_at).format('YYYY-MM-DD HH:mm')}</div>
-                  <div><CalendarOutlined /> 更新时间: {dayjs(selectedVideo.updated_at).format('YYYY-MM-DD HH:mm')}</div>
+                  <div><CalendarOutlined /> 发布时间: {selectedVideo.pubdate ? dayjs(selectedVideo.pubdate).format('YYYY-MM-DD HH:mm') : '-'}</div>
+                  <div><CalendarOutlined /> 解析时间: {selectedVideo.created_at ? dayjs(selectedVideo.created_at).format('YYYY-MM-DD HH:mm') : '-'}</div>
+                  <div><CalendarOutlined /> 更新时间: {selectedVideo.updated_at ? dayjs(selectedVideo.updated_at).format('YYYY-MM-DD HH:mm') : '-'}</div>
                 </Space>
               </Col>
             </Row>
