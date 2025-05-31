@@ -102,6 +102,7 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
     };
   }, [qrCode, status, autoRefresh, refreshInterval]);
   
+  // 组件卸载时清理所有定时器
   useEffect(() => {
     return () => {
       if (pollInterval) {
@@ -109,12 +110,14 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
       }
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
+        pollingRef.current = null;
       }
       if (refreshRef.current) {
         clearTimeout(refreshRef.current);
+        refreshRef.current = null;
       }
     };
-  }, [pollInterval]);
+  }, []);
 
 
   
@@ -169,15 +172,26 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
   };
 
   const startPolling = (sessionId: string) => {
+    // 清理之前的轮询
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      setPollInterval(null);
     }
     
-    pollingRef.current = setInterval(async () => {
+    console.log('开始轮询登录状态，sessionId:', sessionId);
+    
+    const polling = setInterval(async () => {
       try {
+        console.log('轮询检查登录状态...');
         const result = await request(`/api/bilibili/login-status/${sessionId}`, {
           method: 'GET',
         });
+        
+        console.log('登录状态检查结果:', result);
         
         if (result.code === 200) {
           const { status: loginStatus, message: loginMessage } = result.data;
@@ -198,8 +212,27 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
               status: 'success'
             });
             
-            clearInterval(pollingRef.current!);
-            setPollInterval(null);
+            // 停止轮询
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (pollInterval) {
+              clearInterval(pollInterval);
+              setPollInterval(null);
+            }
+            
+            console.log('登录成功，停止轮询');
+            
+            // 延迟重置状态
+            setTimeout(() => {
+              setQrCode('');
+              setSessionId('');
+              setStatus('idle');
+              setStatusMessage('');
+              setCurrentStep(0);
+              setLoginProgress(0);
+            }, 2000);
             
             message.success('登录成功！');
             onLoginSuccess();
@@ -213,19 +246,36 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
               status: loginStatus === 'expired' ? 'expired' : 'failed'
             });
             
-            clearInterval(pollingRef.current!);
-            setPollInterval(null);
+            // 停止轮询
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (pollInterval) {
+              clearInterval(pollInterval);
+              setPollInterval(null);
+            }
+            
+            console.log('登录失败或过期，停止轮询');
           } else if (loginStatus === 'scanned') {
             setCurrentStep(2);
             setLoginProgress(75);
+            console.log('二维码已扫描，等待确认');
+          } else if (loginStatus === 'waiting') {
+            console.log('等待扫描二维码');
           }
+        } else {
+          console.error('获取登录状态失败:', result.message);
         }
       } catch (error) {
         console.error('轮询登录状态失败:', error);
       }
     }, 2000);
 
-    setPollInterval(pollingRef.current);
+    pollingRef.current = polling;
+    setPollInterval(polling);
+    
+    console.log('轮询已启动，间隔2秒');
   };
   
   // 记录登录历史
@@ -249,14 +299,32 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
   };
 
   const resetQRCode = () => {
+    console.log('重置二维码，清理所有状态和定时器');
+    
+    // 清理所有定时器
     if (pollInterval) {
       clearInterval(pollInterval);
       setPollInterval(null);
     }
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    if (refreshRef.current) {
+      clearTimeout(refreshRef.current);
+      refreshRef.current = null;
+    }
+    
+    // 重置状态
     setQrCode('');
     setSessionId('');
     setStatus('idle');
     setStatusMessage('');
+    setCurrentStep(0);
+    setLoginProgress(0);
+    setLoading(false);
+    
+    console.log('二维码重置完成');
   };
 
 
