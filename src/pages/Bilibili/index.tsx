@@ -1,11 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { PageContainer } from '@ant-design/pro-components';
 import { Card, Tabs, message } from 'antd';
-import { VideoCameraOutlined, QrcodeOutlined } from '@ant-design/icons';
+import { 
+  VideoCameraOutlined, 
+  QrcodeOutlined, 
+  DatabaseOutlined,
+  CloudDownloadOutlined,
+  FolderOpenOutlined,
+  AppstoreOutlined
+} from '@ant-design/icons';
 import { useModel, request } from '@umijs/max';
 import BilibiliLogin from './components/BilibiliLogin';
 import VideoParser from './components/VideoParser';
 import AccountManager from './components/AccountManager';
+import AvailableVideos from './components/AvailableVideos';
+import BatchProcessor from './components/BatchProcessor';
+import VideoManager from './components/videomanager';
 
 const { TabPane } = Tabs;
 
@@ -79,10 +89,58 @@ const BilibiliPage: React.FC = () => {
       ),
     },
     {
+      key: 'available',
+      label: (
+        <span>
+          <DatabaseOutlined />
+          可下载视频库
+        </span>
+      ),
+      children: (
+        <AvailableVideos 
+          onRequestPermission={(video) => {
+            message.success(`已申请 ${video.title} 的下载权限`);
+            // 可以在这里添加其他逻辑，比如刷新用户视频列表
+          }}
+        />
+      ),
+    },
+    {
+      key: 'batch',
+      label: (
+        <span>
+          <CloudDownloadOutlined />
+          批量处理
+        </span>
+      ),
+      children: (
+        <BatchProcessor 
+          onProcessComplete={(results) => {
+            message.success(`批量处理完成：成功 ${results.success.length} 个，失败 ${results.failed.length} 个`);
+            // 处理完成后可以刷新视频列表
+          }}
+        />
+      ),
+    },
+    {
+      key: 'manager',
+      label: (
+        <span>
+          <FolderOpenOutlined />
+          我的视频
+        </span>
+      ),
+      children: (
+        <VideoManager 
+          accounts={bilibiliAccounts}
+        />
+      ),
+    },
+    {
       key: 'accounts',
       label: (
         <span>
-          <QrcodeOutlined />
+          <AppstoreOutlined />
           账号管理
         </span>
       ),

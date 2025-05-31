@@ -179,8 +179,15 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
     setVideoInfo(null);
 
     try {
-      const result = await request(`/api/bilibili/parse-videos?input=${encodeURIComponent(inputUrl)}`, {
-        method: 'GET',
+      const result = await request('/api/video/parse', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        data: {
+          url: inputUrl.trim(),
+          quality: selectedQuality
+        }
       });
       
       if (result.code === 200) {
@@ -244,8 +251,15 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
       );
       
       try {
-        const result = await request(`/api/bilibili/parse-videos?input=${encodeURIComponent(item.url)}`, {
-          method: 'GET',
+        const result = await request('/api/video/parse', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          data: {
+            url: item.url,
+            quality: selectedQuality
+          }
         });
         
         if (result.code === 200) {
@@ -309,31 +323,38 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
     try {
       const result = await request('/api/video/process', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         data: {
-          url: video.bvid,
+          url: `https://www.bilibili.com/video/${video.bvid}`,
           quality: selectedQuality,
           downloadMode: downloadMode
         }
       });
       
-      if (result.code === 201) {
+      if (result.code === 200 || result.code === 201) {
         setParseTasks(prev => 
           prev.map(task => task.id === taskId ? { 
             ...task, 
-            status: 'downloading' 
+            status: 'completed' 
           } : task)
         );
         
-        message.success(`开始解析: ${video.title}`);
+        message.success(`视频处理成功: ${video.title}`);
+        notification.success({
+          message: '视频处理完成',
+          description: `${video.title} 已成功下载并入库`
+        });
       } else {
         setParseTasks(prev => 
           prev.map(task => task.id === taskId ? { 
             ...task, 
             status: 'failed',
-            error: result.message || '下载失败'
+            error: result.message || '处理失败'
           } : task)
         );
-        message.error(result.message || '解析失败');
+        message.error(result.message || '视频处理失败');
       }
     } catch (error) {
       setParseTasks(prev => 
@@ -439,6 +460,9 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
   };
 
   const formatDuration = (seconds: number) => {
+    if (seconds === undefined || seconds === null || isNaN(seconds)) {
+      return '00:00';
+    }
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
@@ -450,6 +474,9 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
   };
 
   const formatNumber = (num: number) => {
+    if (num === undefined || num === null || isNaN(num)) {
+      return '0';
+    }
     if (num >= 10000) {
       return `${(num / 10000).toFixed(1)}万`;
     }
@@ -457,6 +484,9 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
   };
 
   const formatDate = (timestamp: number) => {
+    if (timestamp === undefined || timestamp === null || isNaN(timestamp)) {
+      return '未知时间';
+    }
     // pubdate是以秒为单位的时间戳，需要转换为毫秒
     const date = new Date(timestamp * 1000);
     return date.toLocaleDateString('zh-CN', {

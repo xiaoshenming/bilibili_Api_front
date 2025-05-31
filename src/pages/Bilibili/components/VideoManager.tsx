@@ -104,15 +104,15 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
         method: 'GET',
       });
       
-      if (result.code === 200) {
+      if (result.code === 200 || result.code === 201) {
         setVideos(result.data);
         calculateStatistics(result.data);
       } else {
-        message.error(result.message || '获取视频列表失败');
+        message.error(result.message || '获取用户视频列表失败');
       }
     } catch (error) {
       message.error('网络错误，请重试');
-      console.error('获取视频列表失败:', error);
+      console.error('获取用户视频列表失败:', error);
     } finally {
       setLoading(false);
     }
@@ -136,7 +136,7 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
       });
       
       if (result.code === 200) {
-        message.success('视频删除成功');
+        message.success(deleteFile ? '视频及文件删除成功' : '视频记录删除成功');
         fetchVideos();
       } else {
         message.error(result.message || '删除失败');
@@ -179,6 +179,9 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
   };
 
   const formatDuration = (seconds: number) => {
+    if (seconds === undefined || seconds === null || isNaN(seconds)) {
+      return '00:00';
+    }
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
@@ -190,6 +193,9 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
   };
 
   const formatNumber = (num: number) => {
+    if (num === undefined || num === null || isNaN(num)) {
+      return '0';
+    }
     if (num >= 10000) {
       return `${(num / 10000).toFixed(1)}万`;
     }

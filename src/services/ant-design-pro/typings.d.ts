@@ -137,4 +137,150 @@ declare namespace API {
     description?: string;
     type?: NoticeIconItemType;
   };
+
+  // ==================== 视频相关类型定义 ====================
+
+  type VideoInfo = {
+    bvid: string;
+    aid: number;
+    title: string;
+    pic: string;
+    desc: string;
+    duration: number;
+    pubdate: number;
+    owner: {
+      mid: number;
+      name: string;
+      face: string;
+    };
+    stat: {
+      view: number;
+      danmaku: number;
+      reply: number;
+      favorite: number;
+      coin: number;
+      share: number;
+      like: number;
+    };
+    pages: {
+      cid: number;
+      page: number;
+      from: string;
+      part: string;
+      duration: number;
+      vid: string;
+      weblink: string;
+      dimension: {
+        width: number;
+        height: number;
+        rotate: number;
+      };
+    }[];
+    tname: string;
+    copyright: number;
+    tid: number;
+    argue_info: {
+      argue_msg: string;
+      argue_type: number;
+      argue_link: string;
+    };
+    dynamic: string;
+    cid: number;
+    dimension: {
+      width: number;
+      height: number;
+      rotate: number;
+    };
+    premiere: null;
+    teenage_mode: number;
+    is_chargeable_season: boolean;
+    is_story: boolean;
+    no_cache: boolean;
+    subtitle: {
+      allow_submit: boolean;
+      list: any[];
+    };
+    staff: any[];
+    is_season_display: boolean;
+    user_garb: {
+      url_image_ani_cut: string;
+    };
+    honor_reply: {};
+    like_icon: string;
+    need_jump_bv: boolean;
+    disable_show_up_info: boolean;
+  };
+
+  type VideoRecord = {
+    id: string;
+    bvid: string;
+    aid: number;
+    title: string;
+    pic: string;
+    desc: string;
+    duration: number;
+    pubdate: number;
+    publish_time: string;
+    owner_name: string;
+    owner_mid: number;
+    owner_face: string;
+    view_count: number;
+    danmaku_count: number;
+    reply_count: number;
+    favorite_count: number;
+    coin_count: number;
+    share_count: number;
+    like_count: number;
+    tname: string;
+    copyright: number;
+    tid: number;
+    dynamic: string;
+    cid: number;
+    dimension_width: number;
+    dimension_height: number;
+    dimension_rotate: number;
+    file_path: string;
+    file_size: number;
+    download_url: string;
+    quality: number;
+    download_mode: string;
+    status: string;
+    error_message: string;
+    created_at: string;
+    updated_at: string;
+    user_id: number;
+    tags: string[];
+  };
+
+  type VideoPermission = {
+    hasPermission: boolean;
+    relationType?: string;
+    relationDesc?: string;
+    addedAt?: string;
+    videoTitle?: string;
+  };
+
+  type DownloadTask = {
+    id: string;
+    url: string;
+    title: string;
+    status: 'pending' | 'downloading' | 'completed' | 'failed';
+    progress: number;
+    error?: string;
+    createdAt: string;
+  };
+
+  type BatchProcessResult = {
+    success: VideoRecord[];
+    failed: {
+      url: string;
+      error: string;
+    }[];
+  };
+
+  type DownloadLink = {
+    downloadUrl: string;
+    token: string;
+    expiresAt: string;
+  };
 }
