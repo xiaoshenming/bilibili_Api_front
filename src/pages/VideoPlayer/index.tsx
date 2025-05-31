@@ -163,7 +163,10 @@ const VideoPlayer: React.FC = () => {
   };
 
   const handlePlayVideo = (video: VideoRecord) => {
-    setSelectedVideo(video);
+    // 构建播放URL
+    const playUrl = `/api/video/secure-download?token=${encodeURIComponent(video.bvid)}&file=${encodeURIComponent(video.bvid + '.mp4')}`;
+    const videoWithPlayUrl = { ...video, play_url: playUrl };
+    setSelectedVideo(videoWithPlayUrl);
     setPlayerModalVisible(true);
   };
 
@@ -589,7 +592,7 @@ const VideoPlayer: React.FC = () => {
               poster={selectedVideo.thumbnail_url}
               style={{ borderRadius: 8 }}
             >
-              <source src={selectedVideo.play_url || `/api/video/download/${selectedVideo.bvid}`} type="video/mp4" />
+              <source src={selectedVideo.play_url} type="video/mp4" />
               您的浏览器不支持视频播放。
             </video>
             <div style={{ marginTop: 16 }}>

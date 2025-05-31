@@ -44,9 +44,7 @@ import {
   ClearOutlined,
   CheckCircleOutlined,
   LoadingOutlined,
-  ClockCircleOutlined,
-  UserOutlined,
-  CalendarOutlined
+  ClockCircleOutlined
 } from '@ant-design/icons';
 import { CopyToClipboard } from 'react-copy-to-clipboard';
 import { request } from '@umijs/max';
@@ -114,17 +112,23 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
   const [inputUrl, setInputUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [parseModalVisible, setParseModalVisible] = useState(false);
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [downloadUrls, setDownloadUrls] = useState<{videoUrl: string, audioUrl: string} | null>(null);
-  const [playModalVisible, setPlayModalVisible] = useState(false);
   
   // 批量解析相关状态
   const [batchUrls, setBatchUrls] = useState<string>('');
   const [batchParseItems, setBatchParseItems] = useState<BatchParseItem[]>([]);
   const [batchParsing, setBatchParsing] = useState(false);
   
-  // 解析相关状态
+  // 下载相关状态
+  const [parseTasks, setParseTasks] = useState<DownloadTask[]>([]);
   const [selectedQuality, setSelectedQuality] = useState<number>(80);
+  const [downloadMode, setDownloadMode] = useState<string>('auto');
+  const [autoDownload, setAutoDownload] = useState(false);
+  
+  // 设置相关状态
+  const [settingsVisible, setSettingsVisible] = useState(false);
   const [activeTab, setActiveTab] = useState('single');
 
   const activeAccount = accounts.find(acc => acc.is_active);
@@ -141,7 +145,24 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
     { value: 16, label: '360P 流畅 (16)' }
   ];
   
-
+  // 下载模式选项
+  const downloadModeOptions = [
+    { value: 'auto', label: '自动选择' },
+    { value: 'video_audio', label: '视频+音频分离' },
+    { value: 'video_only', label: '仅视频' },
+    { value: 'audio_only', label: '仅音频' }
+  ];
+  
+  useEffect(() => {
+    // 定期检查解析任务状态
+    const interval = setInterval(() => {
+      if (parseTasks.some(task => task.status === 'downloading')) {
+        checkDownloadProgress();
+      }
+    }, 2000);
+    
+    return () => clearInterval(interval);
+  }, [parseTasks]);
 
   const parseVideo = async () => {
     if (!inputUrl.trim()) {
@@ -158,18 +179,18 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
     setVideoInfo(null);
 
     try {
-      // 使用后端提供的解析接口
-      const result = await request('/api/video/parse', {
-        method: 'POST',
-        data: {
-          url: inputUrl,
-          quality: selectedQuality
-        }
+      const result = await request(`/api/bilibili/parse-videos?input=${encodeURIComponent(inputUrl)}`, {
+        method: 'GET',
       });
       
       if (result.code === 200) {
         setVideoInfo(result.data);
         message.success('视频解析成功！');
+        
+        // 如果开启自动下载，直接开始下载
+        if (autoDownload) {
+          startDownload(result.data);
+        }
       } else {
         message.error(result.message || '解析失败');
       }
@@ -223,12 +244,8 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
       );
       
       try {
-        const result = await request('/api/video/parse', {
-          method: 'POST',
-          data: {
-            url: item.url,
-            quality: selectedQuality
-          }
+        const result = await request(`/api/bilibili/parse-videos?input=${encodeURIComponent(item.url)}`, {
+          method: 'GET',
         });
         
         if (result.code === 200) {
@@ -239,6 +256,11 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
               videoInfo: result.data 
             } : p)
           );
+          
+          // 如果开启自动下载，直接开始下载
+          if (autoDownload) {
+            startDownload(result.data);
+          }
         } else {
           setBatchParseItems(prev => 
             prev.map(p => p.id === item.id ? { 
@@ -271,25 +293,94 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
     });
   };
   
-  // 处理视频（解析并保存到数据库）
-  const processVideo = async (video: VideoInfo) => {
+  // 开始下载视频
+  const startDownload = async (video: VideoInfo) => {
+    const taskId = `download_${Date.now()}`;
+    const newTask: DownloadTask = {
+      id: taskId,
+      bvid: video.bvid,
+      title: video.title,
+      status: 'pending',
+      progress: 0
+    };
+    
+    setParseTasks(prev => [...prev, newTask]);
+    
     try {
       const result = await request('/api/video/process', {
         method: 'POST',
         data: {
           url: video.bvid,
-          quality: selectedQuality
+          quality: selectedQuality,
+          downloadMode: downloadMode
         }
       });
       
       if (result.code === 201) {
-        message.success(`视频已保存到数据库: ${video.title}`);
+        setParseTasks(prev => 
+          prev.map(task => task.id === taskId ? { 
+            ...task, 
+            status: 'downloading' 
+          } : task)
+        );
+        
+        message.success(`开始解析: ${video.title}`);
       } else {
-        message.error(result.message || '保存失败');
+        setParseTasks(prev => 
+          prev.map(task => task.id === taskId ? { 
+            ...task, 
+            status: 'failed',
+            error: result.message || '下载失败'
+          } : task)
+        );
+        message.error(result.message || '解析失败');
       }
     } catch (error) {
+      setParseTasks(prev => 
+        prev.map(task => task.id === taskId ? { 
+          ...task, 
+          status: 'failed',
+          error: '网络错误'
+        } : task)
+      );
       message.error('网络错误，请重试');
     }
+  };
+  
+  // 检查解析进度
+  const checkDownloadProgress = async () => {
+    const downloadingTasks = parseTasks.filter(task => task.status === 'downloading');
+    
+    for (const task of downloadingTasks) {
+      try {
+        // 这里应该调用后端API获取解析进度
+        // 暂时模拟进度更新
+        const progress = Math.min(task.progress + Math.random() * 10, 100);
+        
+        setParseTasks(prev => 
+          prev.map(t => t.id === task.id ? { 
+            ...t, 
+            progress,
+            status: progress >= 100 ? 'completed' : 'downloading'
+          } : t)
+        );
+        
+        if (progress >= 100) {
+          notification.success({
+            message: '解析完成',
+            description: task.title
+          });
+        }
+      } catch (error) {
+        console.error('检查解析进度失败:', error);
+      }
+    }
+  };
+  
+  // 取消解析任务
+  const cancelDownload = (taskId: string) => {
+    setParseTasks(prev => prev.filter(task => task.id !== taskId));
+    message.info('已取消解析任务');
   };
   
   // 清空批量解析结果
@@ -298,48 +389,53 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
     setBatchUrls('');
   };
   
-  // 批量保存选中的视频
-  const batchProcessSelected = () => {
+  // 批量下载选中的视频
+  const batchDownloadSelected = () => {
     const selectedItems = batchParseItems.filter(item => 
       item.status === 'completed' && item.videoInfo
     );
     
     if (selectedItems.length === 0) {
-      message.warning('没有可保存的视频');
+      message.warning('没有可下载的视频');
       return;
     }
     
     selectedItems.forEach(item => {
       if (item.videoInfo) {
-        processVideo(item.videoInfo);
+        startDownload(item.videoInfo);
       }
     });
     
-    message.success(`已保存 ${selectedItems.length} 个视频到数据库`);
+    message.success(`已添加 ${selectedItems.length} 个下载任务`);
   };
 
   const getDownloadUrls = async () => {
     if (!videoInfo) return;
 
-    // 直接使用解析时获取的下载链接
-    if (videoInfo.videoUrl && videoInfo.audioUrl) {
-      setDownloadUrls({
-        videoUrl: videoInfo.videoUrl,
-        audioUrl: videoInfo.audioUrl
-      });
-      setDownloadModalVisible(true);
-    } else {
-      message.error('视频下载链接不可用，请重新解析');
+    setLoading(true);
+    try {
+      const result = await request(
+        `/api/bilibili/download?bvid=${videoInfo.bvid}&cid=${videoInfo.cid}&quality=80`,
+        {
+          method: 'GET',
+        }
+      );
+      
+      if (result.code === 200) {
+        setDownloadUrls({
+          videoUrl: result.data.videoUrl,
+          audioUrl: result.data.audioUrl
+        });
+        setDownloadModalVisible(true);
+      } else {
+        message.error(result.message || '获取下载链接失败');
+      }
+    } catch (error) {
+      message.error('网络错误，请重试');
+      console.error('获取下载链接失败:', error);
+    } finally {
+      setLoading(false);
     }
-  };
-
-  // 在线播放视频
-  const playVideo = () => {
-    if (!videoInfo) {
-      message.warning('请先解析视频');
-      return;
-    }
-    setPlayModalVisible(true);
   };
 
   const formatDuration = (seconds: number) => {
@@ -436,22 +532,17 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
                 <Space>
                   <Button 
                     type="primary" 
-                    icon={<PlayCircleOutlined />}
-                    onClick={playVideo}
-                  >
-                    在线播放
-                  </Button>
-                  <Button 
                     icon={<DownloadOutlined />}
                     onClick={getDownloadUrls}
+                    loading={loading}
                   >
                     获取下载链接
                   </Button>
                   <Button 
                     icon={<CloudDownloadOutlined />}
-                    onClick={() => processVideo(videoInfo)}
+                    onClick={() => startDownload(videoInfo)}
                   >
-                    保存到数据库
+                    直接下载
                   </Button>
                 </Space>
               }
@@ -553,11 +644,11 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
                   清空结果
                 </Button>
                 <Button 
-                  onClick={batchProcessSelected}
-                  icon={<CloudDownloadOutlined />}
+                  onClick={batchDownloadSelected}
+                  icon={<DownloadOutlined />}
                   disabled={batchParseItems.filter(item => item.status === 'completed').length === 0}
                 >
-                  批量保存
+                  批量下载
                 </Button>
               </Space>
             </div>
@@ -592,26 +683,13 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
                               <Title level={5} style={{ margin: 0, marginBottom: 4, fontSize: 14 }}>{item.videoInfo.title}</Title>
                               <Text style={{ fontSize: 12, color: '#666' }}>UP主: {item.videoInfo.name}</Text>
                             </div>
-                            <Space>
-                              <Button 
-                                size="small"
-                                type="primary"
-                                onClick={() => {
-                                  setVideoInfo(item.videoInfo!);
-                                  playVideo();
-                                }}
-                                icon={<PlayCircleOutlined />}
-                              >
-                                播放
-                              </Button>
-                              <Button 
-                                size="small"
-                                onClick={() => processVideo(item.videoInfo!)}
-                                icon={<CloudDownloadOutlined />}
-                              >
-                                保存
-                              </Button>
-                            </Space>
+                            <Button 
+                              size="small"
+                              onClick={() => startDownload(item.videoInfo!)}
+                              icon={<DownloadOutlined />}
+                            >
+                              下载
+                            </Button>
                           </div>
                         )}
                         
@@ -629,11 +707,231 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
           </Card>
         </TabPane>
         
-
+        <TabPane tab="解析管理" key="downloads">
+          <Card title="解析任务管理" style={{ marginBottom: 24 }}>
+            {parseTasks.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#666' }}>
+                <CloudDownloadOutlined style={{ fontSize: 48, marginBottom: 8 }} />
+                <div>暂无下载任务</div>
+              </div>
+            ) : (
+              <List
+                dataSource={parseTasks}
+                renderItem={(task) => (
+                  <List.Item>
+                    <div style={{ width: '100%' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <div style={{ flex: 1 }}>
+                          <Title level={5} style={{ margin: 0 }}>{task.title}</Title>
+                          <Text style={{ fontSize: 12, color: '#666' }}>BV号: {task.bvid}</Text>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {task.status === 'pending' && <Tag color="default">等待中</Tag>}
+                          {task.status === 'downloading' && <Tag color="processing">下载中</Tag>}
+                          {task.status === 'completed' && <Tag color="success">已完成</Tag>}
+                          {task.status === 'failed' && <Tag color="error">失败</Tag>}
+                          
+                          {task.status === 'downloading' && (
+                            <Button 
+                              size="small" 
+                              danger 
+                              onClick={() => cancelDownload(task.id)}
+                              icon={<DeleteOutlined />}
+                            >
+                              取消
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {task.status === 'downloading' && (
+                        <Progress 
+                          percent={Math.round(task.progress)} 
+                          size="small" 
+                          status="active"
+                        />
+                      )}
+                      
+                      {task.status === 'failed' && task.error && (
+                        <div style={{ color: '#ff4d4f', fontSize: 12, marginTop: 4 }}>
+                          错误: {task.error}
+                        </div>
+                      )}
+                    </div>
+                  </List.Item>
+                )}
+              />
+            )}
+          </Card>
+        </TabPane>
       </Tabs>
       
+      {/* 设置按钮 */}
+      <div style={{ position: 'fixed', bottom: 24, right: 24 }}>
+        <Button 
+          type="primary" 
+          shape="circle" 
+          size="large"
+          icon={<SettingOutlined />}
+          onClick={() => setSettingsVisible(true)}
+        />
+      </div>
+      
+      {/* 设置模态框 */}
+      <Modal
+        title="下载设置"
+        open={settingsVisible}
+        onCancel={() => setSettingsVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setSettingsVisible(false)}>
+            取消
+          </Button>,
+          <Button key="save" type="primary" onClick={() => setSettingsVisible(false)}>
+            保存设置
+          </Button>
+        ]}
+      >
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <div>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>默认视频质量</Text>
+            <Select
+              value={selectedQuality}
+              onChange={setSelectedQuality}
+              style={{ width: '100%' }}
+              options={qualityOptions}
+            />
+          </div>
+          
+          <div>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>下载模式</Text>
+            <Select
+              value={downloadMode}
+              onChange={setDownloadMode}
+              style={{ width: '100%' }}
+              options={downloadModeOptions}
+            />
+          </div>
+          
+          <div>
+            <Checkbox
+              checked={autoDownload}
+              onChange={(e) => setAutoDownload(e.target.checked)}
+            >
+              解析完成后自动开始下载
+            </Checkbox>
+          </div>
+        </Space>
+      </Modal>
 
-
+      {/* 解析管理模态框 */}
+      <Modal
+        title="解析任务管理"
+        open={parseModalVisible}
+        onCancel={() => setParseModalVisible(false)}
+        width={900}
+        footer={[
+          <Button key="clear" onClick={() => setParseTasks([])}>
+            清空列表
+          </Button>,
+          <Button 
+            key="manage" 
+            type="primary"
+            onClick={() => {
+              setParseModalVisible(false);
+              window.open('/parse-manager', '_blank');
+            }}
+          >
+            打开解析管理中心
+          </Button>,
+          <Button key="close" onClick={() => setParseModalVisible(false)}>
+            关闭
+          </Button>
+        ]}
+      >
+        <List
+          dataSource={parseTasks}
+          renderItem={(task) => (
+            <List.Item
+              actions={[
+                task.status === 'completed' ? (
+                  <Space>
+                    <Button 
+                      type="link" 
+                      icon={<EyeOutlined />}
+                      onClick={() => window.open('/video-player', '_blank')}
+                    >
+                      观看
+                    </Button>
+                    <Button type="link" icon={<CheckCircleOutlined />} style={{ color: '#52c41a' }}>
+                      已完成
+                    </Button>
+                  </Space>
+                ) : task.status === 'parsing' ? (
+                  <Space>
+                    <Button type="link" icon={<LoadingOutlined />} style={{ color: '#1890ff' }}>
+                      解析中
+                    </Button>
+                    <Button type="link" icon={<DeleteOutlined />} danger>
+                      取消
+                    </Button>
+                  </Space>
+                ) : (
+                  <Space>
+                    <Button type="link" icon={<ClockCircleOutlined />} style={{ color: '#faad14' }}>
+                      等待中
+                    </Button>
+                    <Button type="link" icon={<DeleteOutlined />} danger>
+                      取消
+                    </Button>
+                  </Space>
+                )
+              ]}
+            >
+              <List.Item.Meta
+                avatar={
+                  <img
+                    src={task.thumbnail}
+                    alt={task.title}
+                    style={{ width: 60, height: 40, objectFit: 'cover', borderRadius: 4 }}
+                  />
+                }
+                title={task.title}
+                description={
+                  <div>
+                    <div style={{ marginBottom: 4 }}>BVID: {task.bvid}</div>
+                    <div style={{ marginBottom: 8 }}>画质: {getQualityText(task.quality)}</div>
+                    <Progress
+                      percent={Math.round(task.progress)}
+                      status={
+                        task.status === 'completed' ? 'success' : 
+                        task.status === 'parsing' ? 'active' : 'normal'
+                      }
+                      size="small"
+                      format={(percent) => {
+                        if (task.status === 'completed') return '解析完成';
+                        if (task.status === 'parsing') return `解析中 ${percent}%`;
+                        return '等待解析';
+                      }}
+                    />
+                  </div>
+                }
+              />
+            </List.Item>
+          )}
+          locale={{
+            emptyText: (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="暂无解析任务"
+              >
+                <Button type="primary" onClick={() => setParseModalVisible(false)}>
+                  去解析视频
+                </Button>
+              </Empty>
+            )
+          }}
+        />
+      </Modal>
 
       {/* 下载链接模态框 */}
       <Modal
@@ -686,39 +984,6 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
               </CopyToClipboard>
             </Card>
           </Space>
-        )}
-      </Modal>
-
-      {/* 播放器模态框 */}
-      <Modal
-        title="视频播放"
-        open={playModalVisible}
-        onCancel={() => setPlayModalVisible(false)}
-        footer={null}
-        width={900}
-        centered
-      >
-        {videoInfo && (
-          <div>
-            <video
-              controls
-              style={{ width: '100%', maxHeight: '500px' }}
-              poster={videoInfo.pic}
-            >
-              <source src={videoInfo.durl?.[0]?.url || videoInfo.dash?.video?.[0]?.baseUrl} type="video/mp4" />
-              您的浏览器不支持视频播放。
-            </video>
-            
-            <div style={{ marginTop: 16 }}>
-              <Title level={4}>{videoInfo.title}</Title>
-              <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                <Text><UserOutlined /> UP主: {videoInfo.name}</Text>
-                <Text><ClockCircleOutlined /> 时长: {formatDuration(videoInfo.duration)}</Text>
-                <Text><EyeOutlined /> 播放量: {formatNumber(videoInfo.view)}</Text>
-                <Text><CalendarOutlined /> 发布时间: {formatDate(videoInfo.pubdate)}</Text>
-              </Space>
-            </div>
-          </div>
         )}
       </Modal>
     </div>

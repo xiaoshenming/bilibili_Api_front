@@ -1,14 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Card, Button, message, Spin, Alert, Typography, Space, Steps, Image, 
-  Modal, List, Avatar, Tag, Tooltip, Progress, Divider, Row, Col,
-  Statistic, Timeline, Empty, Input, Select, DatePicker, Switch
+  Card, Button, message, Spin, Alert, Typography, Space, Steps, Tag ,Image, 
+  Timeline, Row, Col, Progress, Switch, Select, Avatar
 } from 'antd';
 import { 
   QrcodeOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined,
-  UserOutlined, HistoryOutlined, SecurityScanOutlined, MobileOutlined,
-  WifiOutlined, EnvironmentOutlined, ClockCircleOutlined, EyeOutlined,
-  SafetyCertificateOutlined, ExclamationCircleOutlined, InfoCircleOutlined
+  SecurityScanOutlined, MobileOutlined, HistoryOutlined, SafetyCertificateOutlined,
+  ClockCircleOutlined
 } from '@ant-design/icons';
 import { useModel, request } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -16,7 +14,6 @@ import dayjs from 'dayjs';
 const { Title, Text } = Typography;
 const { Step } = Steps;
 const { Option } = Select;
-const { RangePicker } = DatePicker;
 
 interface BilibiliAccount {
   id: string;
@@ -36,34 +33,10 @@ interface BilibiliAccount {
   accountStatus?: 'active' | 'inactive' | 'warning' | 'banned';
 }
 
-interface LoginHistory {
-  id: string;
-  accountId: string;
-  nickname: string;
-  avatar: string;
-  loginTime: string;
-  loginMethod: 'qrcode' | 'password' | 'sms';
-  deviceInfo: {
-    userAgent: string;
-    ip: string;
-    location?: string;
-    device: string;
-  };
-  status: 'success' | 'failed' | 'expired';
-}
-
 interface QRCodeInfo {
   qrcode_key: string;
   url: string;
   refresh_token?: string;
-}
-
-interface LoginStats {
-  totalLogins: number;
-  successfulLogins: number;
-  failedLogins: number;
-  uniqueAccounts: number;
-  lastLoginTime?: string;
 }
 
 interface BilibiliLoginProps {
@@ -81,30 +54,12 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
   const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [loginProgress, setLoginProgress] = useState<number>(0);
-  
-  // 登录历史相关
-  const [loginHistory, setLoginHistory] = useState<LoginHistory[]>([]);
-  const [historyVisible, setHistoryVisible] = useState<boolean>(false);
-  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
-  const [loginStats, setLoginStats] = useState<LoginStats>({
-    totalLogins: 0,
-    successfulLogins: 0,
-    failedLogins: 0,
-    uniqueAccounts: 0
-  });
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+  const [refreshInterval, setRefreshInterval] = useState<number>(180); // 3分钟
+  const [securityCheck, setSecurityCheck] = useState<boolean>(false);
   
   // 设备和安全相关
   const [deviceInfo, setDeviceInfo] = useState<any>({});
-  const [securityCheck, setSecurityCheck] = useState<boolean>(false);
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
-  const [refreshInterval, setRefreshInterval] = useState<number>(180); // 3分钟
-  
-  // 过滤和搜索
-  const [historyFilter, setHistoryFilter] = useState<{
-    method: string;
-    status: string;
-    dateRange: any[];
-  }>({ method: 'all', status: 'all', dateRange: [] });
   
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const refreshRef = useRef<NodeJS.Timeout | null>(null);
@@ -128,8 +83,6 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
     };
     
     detectDevice();
-    loadLoginHistory();
-    loadLoginStats();
   }, []);
   
   // 自动刷新二维码
@@ -163,50 +116,7 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
     };
   }, [pollInterval]);
 
-  // 加载登录历史
-  const loadLoginHistory = async () => {
-    try {
-      setHistoryLoading(true);
-      const response = await request('/api/bilibili/login-history', {
-        method: 'GET',
-        params: {
-          ...historyFilter,
-          dateRange: historyFilter.dateRange.length > 0 ? {
-            start: historyFilter.dateRange[0]?.format('YYYY-MM-DD'),
-            end: historyFilter.dateRange[1]?.format('YYYY-MM-DD')
-          } : undefined
-        }
-      });
-      
-      if (response.success) {
-        setLoginHistory(response.data || []);
-      }
-    } catch (error) {
-      console.error('加载登录历史失败:', error);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-  
-  // 加载登录统计
-  const loadLoginStats = async () => {
-    try {
-      const response = await request('/api/bilibili/login-stats', {
-        method: 'GET'
-      });
-      
-      if (response.success) {
-        setLoginStats(response.data || {
-          totalLogins: 0,
-          successfulLogins: 0,
-          failedLogins: 0,
-          uniqueAccounts: 0
-        });
-      }
-    } catch (error) {
-      console.error('加载登录统计失败:', error);
-    }
-  };
+
   
   const generateQRCode = async () => {
     if (!initialState?.currentUser) {
@@ -291,9 +201,6 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
             clearInterval(pollingRef.current!);
             setPollInterval(null);
             
-            // 刷新统计
-            loadLoginStats();
-            
             message.success('登录成功！');
             onLoginSuccess();
           } else if (loginStatus === 'expired' || loginStatus === 'error') {
@@ -352,45 +259,7 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
     setStatusMessage('');
   };
 
-  // 获取登录方法标签
-  const getMethodTag = (method: string) => {
-    const methodMap = {
-      qrcode: { color: 'blue', icon: <QrcodeOutlined />, text: '二维码' },
-      password: { color: 'green', icon: <SafetyCertificateOutlined />, text: '密码' },
-      sms: { color: 'orange', icon: <MobileOutlined />, text: '短信' }
-    };
-    const config = methodMap[method as keyof typeof methodMap] || methodMap.qrcode;
-    return <Tag color={config.color} icon={config.icon}>{config.text}</Tag>;
-  };
-  
-  // 获取状态标签
-  const getStatusTag = (status: string) => {
-    const statusMap = {
-      success: { color: 'success', icon: <CheckCircleOutlined />, text: '成功' },
-      failed: { color: 'error', icon: <CloseCircleOutlined />, text: '失败' },
-      expired: { color: 'warning', icon: <ExclamationCircleOutlined />, text: '过期' }
-    };
-    const config = statusMap[status as keyof typeof statusMap] || statusMap.failed;
-    return <Tag color={config.color} icon={config.icon}>{config.text}</Tag>;
-  };
-  
-  // 过滤登录历史
-  const getFilteredHistory = () => {
-    return loginHistory.filter(item => {
-      const methodMatch = historyFilter.method === 'all' || item.loginMethod === historyFilter.method;
-      const statusMatch = historyFilter.status === 'all' || item.status === historyFilter.status;
-      
-      let dateMatch = true;
-      if (historyFilter.dateRange.length === 2) {
-        const itemDate = dayjs(item.loginTime);
-        const startDate = historyFilter.dateRange[0];
-        const endDate = historyFilter.dateRange[1];
-        dateMatch = itemDate.isAfter(startDate.startOf('day')) && itemDate.isBefore(endDate.endOf('day'));
-      }
-      
-      return methodMatch && statusMatch && dateMatch;
-    });
-  };
+
 
   const getStatusColor = () => {
     switch (status) {
@@ -410,53 +279,8 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
     }
   };
 
-  const filteredHistory = getFilteredHistory();
-  
   return (
     <div className="bilibili-login">
-      {/* 统计面板 */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="总登录次数"
-              value={loginStats.totalLogins}
-              prefix={<HistoryOutlined />}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="成功登录"
-              value={loginStats.successfulLogins}
-              prefix={<CheckCircleOutlined />}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="失败次数"
-              value={loginStats.failedLogins}
-              prefix={<CloseCircleOutlined />}
-              valueStyle={{ color: '#ff4d4f' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="账号数量"
-              value={loginStats.uniqueAccounts}
-              prefix={<UserOutlined />}
-              valueStyle={{ color: '#722ed1' }}
-            />
-          </Card>
-        </Col>
-      </Row>
       
       {/* 已登录账号展示 */}
       {accounts.length > 0 && (
@@ -684,92 +508,7 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
         </Timeline>
       </Card>
       
-      {/* 登录历史模态框 */}
-      <Modal
-        title="登录历史"
-        open={historyVisible}
-        onCancel={() => setHistoryVisible(false)}
-        width={800}
-        footer={null}
-      >
-        {/* 过滤器 */}
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
-            <Select
-              placeholder="登录方式"
-              value={historyFilter.method}
-              onChange={(value) => setHistoryFilter(prev => ({ ...prev, method: value }))}
-              style={{ width: '100%' }}
-            >
-              <Option value="all">全部方式</Option>
-              <Option value="qrcode">二维码</Option>
-              <Option value="password">密码</Option>
-              <Option value="sms">短信</Option>
-            </Select>
-          </Col>
-          <Col span={6}>
-            <Select
-              placeholder="登录状态"
-              value={historyFilter.status}
-              onChange={(value) => setHistoryFilter(prev => ({ ...prev, status: value }))}
-              style={{ width: '100%' }}
-            >
-              <Option value="all">全部状态</Option>
-              <Option value="success">成功</Option>
-              <Option value="failed">失败</Option>
-              <Option value="expired">过期</Option>
-            </Select>
-          </Col>
-          <Col span={8}>
-            <RangePicker
-              value={historyFilter.dateRange}
-              onChange={(dates) => setHistoryFilter(prev => ({ ...prev, dateRange: dates || [] }))}
-              style={{ width: '100%' }}
-            />
-          </Col>
-          <Col span={4}>
-            <Button onClick={loadLoginHistory} loading={historyLoading}>
-              刷新
-            </Button>
-          </Col>
-        </Row>
-        
-        {/* 历史列表 */}
-        {filteredHistory.length === 0 ? (
-          <Empty description="暂无登录历史" />
-        ) : (
-          <List
-            dataSource={filteredHistory}
-            renderItem={(item) => (
-              <List.Item>
-                <List.Item.Meta
-                  avatar={<Avatar src={item.avatar} icon={<UserOutlined />} />}
-                  title={
-                    <Space>
-                      <Text strong>{item.nickname}</Text>
-                      {getMethodTag(item.loginMethod)}
-                      {getStatusTag(item.status)}
-                    </Space>
-                  }
-                  description={
-                    <Space direction="vertical" size={4}>
-                      <Text type="secondary">
-                        <ClockCircleOutlined /> {dayjs(item.loginTime).format('YYYY-MM-DD HH:mm:ss')}
-                      </Text>
-                      <Text type="secondary">
-                        <EnvironmentOutlined /> {item.deviceInfo.location || '未知位置'} | {item.deviceInfo.ip}
-                      </Text>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {item.deviceInfo.device}
-                      </Text>
-                    </Space>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        )}
-      </Modal>
+
     </div>
   );
 };
