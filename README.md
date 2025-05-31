@@ -1,3 +1,734 @@
+# 视频下载权限每日限制功能
+
+## 功能概述
+
+本功能实现了基于用户权限等级的视频下载申请每日限制，使用Redis来跟踪和管理每日申请次数。
+
+## 权限等级限制
+
+| 权限等级 | 每日申请限制 | 说明 |
+|---------|-------------|------|
+| 1级权限 | 1个视频 | 普通用户 |
+| 2级权限 | 10个视频 | 高级用户 |
+| 3级权限 | 100个视频 | VIP用户 |
+| 4级权限 | 无限制 | 管理员/超级管理员 |
+
+## 重要规则
+
+1. **自己的视频不受限制**：用户申请自己上传或处理的视频下载权限时，不计入每日限制
+2. **每日重置**：每天00:00自动重置申请次数
+3. **Redis存储**：使用Redis存储每日申请计数，键格式：`download_requests:{userId}:{YYYY-MM-DD}`
+4. **自动过期**：Redis键会在次日00:00自动过期
+
+## API接口
+
+### 1. 申请视频下载权限
+
+**接口地址**：`POST /api/video/add-download-permission`
+
+**请求头**：
+```
+Authorization: Bearer {token}
+Content-Type: application/json
+```
+
+**请求体**：
+```json
+{
+  "bvid": "BV1234567890"
+}
+```
+
+**响应示例**：
+
+成功响应：
+```json
+{
+  "code": 200,
+  "message": "成功添加下载权限",
+  "data": {
+    "success": true,
+    "message": "成功添加下载权限",
+    "videoTitle": "视频标题",
+    "bvid": "BV1234567890"
+  }
+}
+```
+
+达到限制时的响应：
+```json
+{
+  "code": 500,
+  "message": "您的1级权限每日只能申请1个视频下载权限，今日已达上限。明日00:00重置。",
+  "data": null
+}
+```
+
+### 2. 查询每日限制状态
+
+**接口地址**：`GET /api/video/daily-limit-status`
+
+**请求头**：
+```
+Authorization: Bearer {token}
+```
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "获取每日限制状态成功",
+  "data": {
+    "userRole": "1",
+    "roleName": "1级",
+    "totalLimit": 1,
+    "usedCount": 0,
+    "remaining": 1,
+    "canApply": true,
+    "resetTime": "每日00:00重置"
+  }
+}
+```
+
+## 测试步骤
+
+### 1. 测试不同权限等级的限制
+
+1. 使用1级权限用户登录，申请2个不同的视频下载权限
+2. 第一个应该成功，第二个应该被拒绝
+3. 使用2级权限用户登录，可以申请10个视频
+4. 使用4级权限用户登录，应该可以无限申请
+
+### 2. 测试自己视频不受限制
+
+1. 使用1级权限用户上传一个视频
+2. 申请自己视频的下载权限，不应该计入每日限制
+3. 再申请其他人的视频，仍然有完整的每日限制
+
+### 3. 测试每日重置
+
+1. 用完当日限制后，等待到次日00:00
+2. 或者手动删除Redis中的计数键进行测试
+3. 验证限制是否重置
+
+### 4. 测试Redis键过期
+
+使用Redis客户端查看键的TTL：
+```bash
+redis-cli
+TTL download_requests:1:2024-01-01
+```
+
+## 技术实现细节
+
+### Redis键设计
+- **键格式**：`download_requests:{userId}:{YYYY-MM-DD}`
+- **值**：申请次数（整数）
+- **过期时间**：到次日00:00的秒数
+
+### 核心函数
+
+1. `checkDailyDownloadLimit(userId, userRole, redis)`：检查用户是否还能申请
+2. `incrementDailyDownloadCount(userId, redis)`：增加申请计数
+3. `addVideoDownloader(userId, bvid)`：主要的申请逻辑
+
+### 数据库查询优化
+
+- 检查用户权限：`SELECT role FROM user WHERE id = ?`
+- 检查视频所有权：`SELECT relation_type FROM user_videos WHERE user_id = ? AND video_id = ? AND relation_type IN ('uploader', 'processor')`
+
+## 注意事项
+
+1. 确保Redis服务正常运行
+2. 确保用户表中的role字段正确设置
+3. 时区问题：当前使用系统时区，如需要可调整为特定时区
+4. 性能考虑：Redis操作是异步的，在高并发情况下需要考虑原子性
+
+const express = require('express');
+const router = express.Router();
+const authorize = require("../auth/authUtils"); // 您的授权中间件
+const { checkDailyDownloadLimit } = require('./videoUtils');
+const redis = require('../../config/redis');
+
+/**
+ * @api {get} /api/video/daily-limit-status
+ * @description 查询用户当前的每日下载申请限制状态
+ * @access Protected - 需要用户登录
+ */
+router.get('/daily-limit-status', authorize(['1', '2', '3', '4']), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const userRole = req.user.role;
+    
+    // 获取今日申请次数
+    const today = new Date().toISOString().split('T')[0];
+    const redisKey = `download_requests:${userId}:${today}`;
+    const currentCount = parseInt(await redis.get(redisKey) || 0);
+    
+    // 检查限制状态
+    const limitStatus = await checkDailyDownloadLimit(userId, userRole, redis);
+    
+    // 根据权限等级设置每日限制
+    const dailyLimits = {
+      '1': 1,    // 1级权限：每天1个
+      '2': 10,   // 2级权限：每天10个
+      '3': 100,  // 3级权限：每天100个
+      '4': -1    // 4级权限：无限制
+    };
+    
+    const totalLimit = dailyLimits[userRole] || 1;
+    const roleNames = { '1': '1级', '2': '2级', '3': '3级', '4': '4级' };
+    
+    res.status(200).json({
+      code: 200,
+      message: '获取每日限制状态成功',
+      data: {
+        userRole: userRole,
+        roleName: roleNames[userRole],
+        totalLimit: totalLimit === -1 ? '无限制' : totalLimit,
+        usedCount: currentCount,
+        remaining: limitStatus.remaining === -1 ? '无限制' : limitStatus.remaining,
+        canApply: limitStatus.allowed,
+        resetTime: '每日00:00重置'
+      }
+    });
+  } catch (error) {
+    console.error('获取每日限制状态失败:', error);
+    res.status(500).json({
+      code: 500,
+      message: '获取每日限制状态失败',
+      data: null
+    });
+  }
+});
+
+module.exports = router;
+
+// model/video/videoRouters.js
+
+const express = require("express");
+const router = express.Router();
+const videoUtils = require("./videoUtils");
+const bilibiliUtils = require("../bilibili/bilibiliUtils");
+const authorize = require("../auth/authUtils"); // 导入授权中间件
+
+/**
+ * @api {get} /api/video/list
+ * @description 获取所有已处理的视频列表
+ * @access Public
+ */
+router.get("/list", async (req, res) => {
+  try {
+    const videos = await videoUtils.listAllVideos();
+    res.status(200).json({
+      code: 200,
+      message: "成功获取视频列表",
+      data: videos,
+    });
+  } catch (error) {
+    res.status(500).json({
+      code: 500,
+      message: error.message || "获取视频列表失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {get} /api/video/user-list
+ * @description 获取当前用户处理的视频列表
+ * @access Protected - 需要用户登录
+ */
+router.get("/user-list", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const videos = await videoUtils.getUserVideos(userId);
+    res.status(200).json({
+      code: 200,
+      message: "成功获取用户视频列表",
+      data: videos,
+    });
+  } catch (error) {
+    res.status(500).json({
+      code: 500,
+      message: error.message || "获取用户视频列表失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/parse
+ * @description 解析B站视频信息（不下载，仅获取视频详情）
+ * @access Protected - 需要用户登录和B站账号
+ * @body { "url": "视频的URL或BVID", "quality": "清晰度(可选)" }
+ */
+router.post("/parse", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { url, quality = 80 } = req.body;
+    
+    if (!url || !url.trim()) {
+      return res.status(400).json({
+        code: 400,
+        message: "请提供有效的视频 URL",
+        data: null,
+      });
+    }
+
+    // 检查用户是否有活跃的B站账号
+    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
+    if (!bilibiliAccount) {
+      return res.status(400).json({
+        code: 400,
+        message: "请先登录B站账号",
+        data: null
+      });
+    }
+
+    console.log(`▶️ 开始解析视频: ${url}`);
+    const result = await videoUtils.parseVideoInfo(url, bilibiliAccount.cookie_string, quality);
+    console.log(`✅ 视频解析完成: ${result.title}`);
+    
+    res.status(200).json({
+      code: 200,
+      message: "视频解析成功",
+      data: result,
+    });
+  } catch (error) {
+    console.error(`❌ 解析视频失败:`, error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "解析视频失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/process
+ * @description 处理B站视频（解析、下载、合并、入库）
+ * @access Protected - 需要用户登录和B站账号
+ * @body { "url": "视频的URL或BVID", "quality": "清晰度(可选)", "downloadMode": "下载模式(可选)" }
+ */
+router.post("/process", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { url, quality = 80, downloadMode = "auto" } = req.body;
+    
+    if (!url || !url.trim()) {
+      return res.status(400).json({
+        code: 400,
+        message: "请提供有效的视频 URL",
+        data: null,
+      });
+    }
+
+    // 检查用户是否有活跃的B站账号
+    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
+    if (!bilibiliAccount) {
+      return res.status(400).json({
+        code: 400,
+        message: "请先登录B站账号",
+        data: null
+      });
+    }
+
+    console.log(`▶️ 开始处理视频请求: ${url}`);
+    const result = await videoUtils.processVideoRequest({
+      url,
+      userId,
+      cookieString: bilibiliAccount.cookie_string,
+      quality,
+      downloadMode,
+      bilibiliAccountId: bilibiliAccount.id
+    });
+    console.log(`✅ 视频处理完成: ${result.title}`);
+    
+    res.status(201).json({
+      code: 201,
+      message: "视频处理成功并已入库",
+      data: result,
+    });
+  } catch (error) {
+    console.error(`❌ 处理视频失败:`, error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "处理视频时发生未知错误",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/batch-process
+ * @description 批量处理B站视频
+ * @access Protected - 需要用户登录和B站账号
+ * @body { "urls": ["视频URL数组"], "quality": "清晰度(可选)", "downloadMode": "下载模式(可选)" }
+ */
+router.post("/batch-process", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { urls, quality = 80, downloadMode = "auto" } = req.body;
+    
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({
+        code: 400,
+        message: "请提供有效的视频 URL 数组",
+        data: null,
+      });
+    }
+
+    if (urls.length > 10) {
+      return res.status(400).json({
+        code: 400,
+        message: "批量处理最多支持10个视频",
+        data: null,
+      });
+    }
+
+    // 检查用户是否有活跃的B站账号
+    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
+    if (!bilibiliAccount) {
+      return res.status(400).json({
+        code: 400,
+        message: "请先登录B站账号",
+        data: null
+      });
+    }
+
+    console.log(`▶️ 开始批量处理 ${urls.length} 个视频`);
+    const results = await videoUtils.batchProcessVideos({
+      urls,
+      userId,
+      cookieString: bilibiliAccount.cookie_string,
+      quality,
+      downloadMode,
+      bilibiliAccountId: bilibiliAccount.id
+    });
+    console.log(`✅ 批量处理完成，成功: ${results.success.length}, 失败: ${results.failed.length}`);
+    
+    res.status(200).json({
+      code: 200,
+      message: `批量处理完成，成功: ${results.success.length}, 失败: ${results.failed.length}`,
+      data: results,
+    });
+  } catch (error) {
+    console.error(`❌ 批量处理视频失败:`, error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "批量处理视频失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {delete} /api/video/:id
+ * @description 删除视频记录和文件
+ * @access Protected - 需要用户登录
+ */
+router.delete("/:id", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { id } = req.params;
+    const { deleteFile = false } = req.query;
+    
+    await videoUtils.deleteVideo(id, userId, deleteFile === 'true');
+    
+    res.status(200).json({
+      code: 200,
+      message: "视频删除成功",
+      data: null,
+    });
+  } catch (error) {
+    console.error(`❌ 删除视频失败:`, error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "删除视频失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/generate-download-link
+ * @description 生成安全下载链接
+ * @access Protected - 需要用户登录
+ */
+router.post("/generate-download-link", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const { fileName } = req.body;
+    const userId = req.user.uid || req.user.id;
+    
+    if (!fileName) {
+      return res.status(400).json({
+        code: 400,
+        message: "文件名不能为空",
+        data: null,
+      });
+    }
+    
+    // 检查用户是否有权限下载该文件
+    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
+    if (!hasPermission) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权限下载该文件",
+        data: null,
+      });
+    }
+    
+    // 生成安全下载链接
+    const downloadInfo = videoUtils.generateSecureDownloadLink(fileName, userId);
+    
+    res.status(200).json({
+      code: 200,
+      message: "下载链接生成成功",
+      data: downloadInfo,
+    });
+  } catch (error) {
+    console.error("生成下载链接失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "生成下载链接失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {get} /api/video/secure-download
+ * @description 安全文件下载（支持断点续传）
+ * @access Public - 通过token验证
+ */
+router.get("/secure-download", async (req, res) => {
+  try {
+    const { token, file } = req.query;
+    
+    if (!token || !file) {
+      return res.status(400).json({
+        code: 400,
+        message: "缺少必要参数",
+        data: null,
+      });
+    }
+    
+    // 验证token
+    const payload = videoUtils.verifyDownloadToken(token);
+    if (!payload) {
+      return res.status(401).json({
+        code: 401,
+        message: "下载链接已过期或无效",
+        data: null,
+      });
+    }
+    
+    // 验证文件名是否匹配
+    if (payload.fileName !== file) {
+      return res.status(403).json({
+        code: 403,
+        message: "文件访问权限验证失败",
+        data: null,
+      });
+    }
+    
+    // 再次检查用户权限
+    const hasPermission = await videoUtils.checkDownloadPermission(file, payload.userId);
+    if (!hasPermission) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权限下载该文件",
+        data: null,
+      });
+    }
+    
+    // 处理安全下载
+    await videoUtils.handleSecureDownload(file, req, res);
+    
+  } catch (error) {
+    console.error("安全下载失败:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        code: 500,
+        message: error.message || "下载失败",
+        data: null,
+      });
+    }
+  }
+});
+
+/**
+ * @api {get} /api/video/download/:bvid
+ * @description 直接下载视频（兼容旧版本）
+ * @access Protected - 需要用户登录
+ */
+router.get("/download/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const { bvid } = req.params;
+    const userId = req.user.uid || req.user.id;
+    
+    // 构造文件名
+    const fileName = `${bvid}.mp4`;
+    
+    // 检查用户是否有权限下载该文件
+    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
+    if (!hasPermission) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权限下载该文件，请先添加下载权限",
+        data: null,
+      });
+    }
+    
+    // 处理安全下载
+    await videoUtils.handleSecureDownload(fileName, req, res);
+    
+  } catch (error) {
+    console.error("直接下载失败:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        code: 500,
+        message: error.message || "下载失败",
+        data: null,
+      });
+    }
+  }
+});
+
+/**
+ * @api {get} /api/video/available
+ * @description 获取所有可下载的视频列表（公开接口）
+ * @access Public
+ */
+router.get("/available", async (req, res) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+    // 确保参数是有效的数字，避免传递NaN
+    const parsedLimit = parseInt(limit);
+    const parsedOffset = parseInt(offset);
+    const validLimit = Math.max(1, Math.min(100, isNaN(parsedLimit) ? 20 : parsedLimit));
+    const validOffset = Math.max(0, isNaN(parsedOffset) ? 0 : parsedOffset);
+    
+    const result = await videoUtils.getAvailableVideos(
+      validLimit, 
+      validOffset
+    );
+    
+    res.status(200).json({
+      code: 200,
+      message: "成功获取可下载视频列表",
+      data: result,
+    });
+  } catch (error) {
+    console.error("获取可下载视频列表失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "获取视频列表失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/add-download-permission
+ * @description 添加视频下载权限
+ * @access Protected - 需要用户登录
+ * @body { "bvid": "视频BVID" }
+ */
+router.post("/add-download-permission", authorize(["1", "2", "3", "4"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { bvid } = req.body;
+    
+    if (!bvid || !bvid.trim()) {
+      return res.status(400).json({
+        code: 400,
+        message: "请提供有效的视频BVID",
+        data: null,
+      });
+    }
+    
+    const result = await videoUtils.addVideoDownloader(userId, bvid.trim());
+    
+    res.status(200).json({
+      code: 200,
+      message: result.message,
+      data: result,
+    });
+  } catch (error) {
+    console.error("添加下载权限失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "添加下载权限失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {get} /api/video/my-permissions/:bvid
+ * @description 查看用户对特定视频的权限
+ * @access Protected - 需要用户登录
+ */
+router.get("/my-permissions/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { bvid } = req.params;
+    
+    // 检查用户对该视频的权限
+    const fileName = `${bvid}.mp4`;
+    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
+    
+    if (hasPermission) {
+      // 获取具体的关系类型
+      const db = require("../../config/db").promise();
+      const [relations] = await db.execute(
+        `SELECT uv.relation_type, uv.created_at, v.title 
+         FROM user_videos uv 
+         INNER JOIN videos v ON uv.video_id = v.id 
+         WHERE uv.user_id = ? AND v.bvid = ?`,
+        [userId, bvid]
+      );
+      
+      if (relations.length > 0) {
+        const relation = relations[0];
+        res.status(200).json({
+          code: 200,
+          message: "有权限访问该视频",
+          data: {
+            hasPermission: true,
+            relationType: relation.relation_type,
+            relationDesc: videoUtils.getRelationTypeDesc ? videoUtils.getRelationTypeDesc(relation.relation_type) : relation.relation_type,
+            addedAt: relation.created_at,
+            videoTitle: relation.title
+          },
+        });
+      } else {
+        res.status(200).json({
+          code: 200,
+          message: "无权限访问该视频",
+          data: { hasPermission: false },
+        });
+      }
+    } else {
+      res.status(200).json({
+        code: 200,
+        message: "无权限访问该视频",
+        data: { hasPermission: false },
+      });
+    }
+  } catch (error) {
+    console.error("查询权限失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "查询权限失败",
+      data: null,
+    });
+  }
+});
+
+module.exports = router;
 // model/video/videoUtils.js
 
 const axios = require("axios");
@@ -912,14 +1643,104 @@ async function handleSecureDownload(fileName, req, res) {
 }
 
 /**
+ * 检查用户每日下载申请限制
+ * @param {number} userId - 用户ID
+ * @param {string} userRole - 用户权限等级
+ * @param {Object} redis - Redis连接实例
+ * @returns {Promise<Object>} 检查结果
+ */
+async function checkDailyDownloadLimit(userId, userRole, redis) {
+  try {
+    // 根据用户权限等级设置每日限制
+    const dailyLimits = {
+      '1': 1,    // 1级权限：每天1个
+      '2': 10,   // 2级权限：每天10个
+      '3': 100,  // 3级权限：每天100个
+      '4': -1    // 4级权限：无限制
+    };
+    
+    const limit = dailyLimits[userRole] || 1; // 默认1级权限
+    
+    // 4级权限无限制
+    if (limit === -1) {
+      return { allowed: true, remaining: -1 };
+    }
+    
+    // 获取今日申请次数的Redis键
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD格式
+    const redisKey = `download_requests:${userId}:${today}`;
+    
+    // 获取当前申请次数
+    const currentCount = await redis.get(redisKey) || 0;
+    const remaining = limit - parseInt(currentCount);
+    
+    if (remaining <= 0) {
+      const roleNames = { '1': '1级', '2': '2级', '3': '3级', '4': '4级' };
+      return {
+        allowed: false,
+        message: `您的${roleNames[userRole]}权限每日只能申请${limit}个视频下载权限，今日已达上限。明日00:00重置。`,
+        remaining: 0
+      };
+    }
+    
+    return { allowed: true, remaining };
+  } catch (error) {
+    console.error('检查每日下载限制失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 增加用户每日下载申请计数
+ * @param {number} userId - 用户ID
+ * @param {Object} redis - Redis连接实例
+ */
+async function incrementDailyDownloadCount(userId, redis) {
+  try {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD格式
+    const redisKey = `download_requests:${userId}:${today}`;
+    
+    // 增加计数
+    await redis.incr(redisKey);
+    
+    // 设置过期时间到明日00:00
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    const secondsUntilMidnight = Math.floor((tomorrow.getTime() - Date.now()) / 1000);
+    
+    await redis.expire(redisKey, secondsUntilMidnight);
+    
+    console.log(`📊 用户${userId}今日申请计数已更新，过期时间：${secondsUntilMidnight}秒后`);
+  } catch (error) {
+    console.error('更新每日下载计数失败:', error);
+    throw error;
+  }
+}
+
+/**
  * 添加用户视频关联关系（下载者）
  * @param {number} userId - 用户ID
  * @param {string} bvid - 视频BVID
  * @returns {Promise<Object>} 操作结果
  */
 async function addVideoDownloader(userId, bvid) {
+  const redis = require('../config/redis');
+  
   try {
     console.log(`🔗 用户 ${userId} 请求添加视频 ${bvid} 的下载权限`);
+    
+    // 获取用户信息和权限等级
+    const [users] = await db.execute(
+      "SELECT role FROM user WHERE id = ?",
+      [userId]
+    );
+    
+    if (users.length === 0) {
+      throw new Error('用户不存在');
+    }
+    
+    const userRole = users[0].role;
     
     // 检查视频是否存在
     const [videos] = await db.execute(
@@ -948,11 +1769,30 @@ async function addVideoDownloader(userId, bvid) {
       };
     }
     
+    // 检查是否为自己的视频（上传者或处理者不受限制）
+    const [ownerRelations] = await db.execute(
+      "SELECT relation_type FROM user_videos WHERE user_id = ? AND video_id = ? AND relation_type IN ('uploader', 'processor')",
+      [userId, video.id]
+    );
+    
+    if (ownerRelations.length === 0) {
+      // 不是自己的视频，需要检查每日申请限制
+      const dailyLimit = await checkDailyDownloadLimit(userId, userRole, redis);
+      if (!dailyLimit.allowed) {
+        throw new Error(dailyLimit.message);
+      }
+    }
+    
     // 添加下载者关系
     await db.execute(
       "INSERT INTO user_videos (user_id, video_id, relation_type) VALUES (?, ?, 'downloader')",
       [userId, video.id]
     );
+    
+    // 如果不是自己的视频，增加今日申请计数
+    if (ownerRelations.length === 0) {
+      await incrementDailyDownloadCount(userId, redis);
+    }
     
     console.log(`✅ 成功添加下载者关系: 用户${userId} -> 视频${video.title}`);
     
@@ -1062,530 +1902,47 @@ module.exports = {
   checkDownloadPermission,
   handleSecureDownload,
   addVideoDownloader,
-  getAvailableVideos
+  getAvailableVideos,
+  checkDailyDownloadLimit,
+  incrementDailyDownloadCount
 };
-// model/video/videoRouters.js
-
+// app.js
 const express = require("express");
-const router = express.Router();
-const videoUtils = require("./videoUtils");
-const bilibiliUtils = require("../bilibili/bilibiliUtils");
-const authorize = require("../auth/authUtils"); // 导入授权中间件
+const cors = require("cors");
+const http = require("http");
+require("dotenv").config();
 
-/**
- * @api {get} /api/video/list
- * @description 获取所有已处理的视频列表
- * @access Public
- */
-router.get("/list", async (req, res) => {
-  try {
-    const videos = await videoUtils.listAllVideos();
-    res.status(200).json({
-      code: 200,
-      message: "成功获取视频列表",
-      data: videos,
-    });
-  } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: error.message || "获取视频列表失败",
-      data: null,
-    });
-  }
+const { startHeartbeats } = require("./config/heartbeat");
+const userRouter = require("./model/user/userRouters");
+const videoRouter = require("./model/video/videoRouters"); // 【新增】导入视频路由
+const dailyLimitRouter = require("./model/video/dailyLimitRoutes"); // 【新增】导入每日限制路由
+const bilibiliRouter = require("./model/bilibili/bilibiliRouters"); // 【新增】导入B站路由
+
+const app = express();
+const server = http.createServer(app);
+const port = process.env.PORT || 3000;
+
+// --- 中间件 ---
+app.use(cors()); // 启用 CORS
+app.use(express.json()); // 解析 JSON 请求体
+
+// --- 静态文件服务 ---
+// 提供视频文件的直接访问服务
+// 移除静态文件服务 - 改为安全的token验证下载方案
+// const path = require("path");
+// const serveIndex = require("serve-index");
+// const videoDir = path.join(__dirname, "videos");
+// app.use("/api/videos", express.static(videoDir), serveIndex(videoDir, { icons: true }));
+
+// --- 路由 ---
+app.use("/api", userRouter); // 挂载用户路由，建议添加前缀 /user
+app.use("/api/video", videoRouter); // 【新增】挂载视频路由，统一前缀 /video
+app.use("/api/video", dailyLimitRouter); // 【新增】挂载每日限制路由，统一前缀 /video
+app.use("/api/bilibili", bilibiliRouter); // 【新增】挂载B站路由，统一前缀 /bilibili
+
+// --- 启动服务 ---
+startHeartbeats(); // 启动数据库和 Redis 的心跳检测
+
+server.listen(port, "0.0.0.0", () => {
+  console.log(`✅ 服务器已成功启动，正在监听端口：http://0.0.0.0:${port}`);
 });
-
-/**
- * @api {get} /api/video/user-list
- * @description 获取当前用户处理的视频列表
- * @access Protected - 需要用户登录
- */
-router.get("/user-list", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const videos = await videoUtils.getUserVideos(userId);
-    res.status(200).json({
-      code: 200,
-      message: "成功获取用户视频列表",
-      data: videos,
-    });
-  } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: error.message || "获取用户视频列表失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {post} /api/video/parse
- * @description 解析B站视频信息（不下载，仅获取视频详情）
- * @access Protected - 需要用户登录和B站账号
- * @body { "url": "视频的URL或BVID", "quality": "清晰度(可选)" }
- */
-router.post("/parse", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { url, quality = 80 } = req.body;
-    
-    if (!url || !url.trim()) {
-      return res.status(400).json({
-        code: 400,
-        message: "请提供有效的视频 URL",
-        data: null,
-      });
-    }
-
-    // 检查用户是否有活跃的B站账号
-    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
-    if (!bilibiliAccount) {
-      return res.status(400).json({
-        code: 400,
-        message: "请先登录B站账号",
-        data: null
-      });
-    }
-
-    console.log(`▶️ 开始解析视频: ${url}`);
-    const result = await videoUtils.parseVideoInfo(url, bilibiliAccount.cookie_string, quality);
-    console.log(`✅ 视频解析完成: ${result.title}`);
-    
-    res.status(200).json({
-      code: 200,
-      message: "视频解析成功",
-      data: result,
-    });
-  } catch (error) {
-    console.error(`❌ 解析视频失败:`, error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "解析视频失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {post} /api/video/process
- * @description 处理B站视频（解析、下载、合并、入库）
- * @access Protected - 需要用户登录和B站账号
- * @body { "url": "视频的URL或BVID", "quality": "清晰度(可选)", "downloadMode": "下载模式(可选)" }
- */
-router.post("/process", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { url, quality = 80, downloadMode = "auto" } = req.body;
-    
-    if (!url || !url.trim()) {
-      return res.status(400).json({
-        code: 400,
-        message: "请提供有效的视频 URL",
-        data: null,
-      });
-    }
-
-    // 检查用户是否有活跃的B站账号
-    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
-    if (!bilibiliAccount) {
-      return res.status(400).json({
-        code: 400,
-        message: "请先登录B站账号",
-        data: null
-      });
-    }
-
-    console.log(`▶️ 开始处理视频请求: ${url}`);
-    const result = await videoUtils.processVideoRequest({
-      url,
-      userId,
-      cookieString: bilibiliAccount.cookie_string,
-      quality,
-      downloadMode,
-      bilibiliAccountId: bilibiliAccount.id
-    });
-    console.log(`✅ 视频处理完成: ${result.title}`);
-    
-    res.status(201).json({
-      code: 201,
-      message: "视频处理成功并已入库",
-      data: result,
-    });
-  } catch (error) {
-    console.error(`❌ 处理视频失败:`, error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "处理视频时发生未知错误",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {post} /api/video/batch-process
- * @description 批量处理B站视频
- * @access Protected - 需要用户登录和B站账号
- * @body { "urls": ["视频URL数组"], "quality": "清晰度(可选)", "downloadMode": "下载模式(可选)" }
- */
-router.post("/batch-process", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { urls, quality = 80, downloadMode = "auto" } = req.body;
-    
-    if (!urls || !Array.isArray(urls) || urls.length === 0) {
-      return res.status(400).json({
-        code: 400,
-        message: "请提供有效的视频 URL 数组",
-        data: null,
-      });
-    }
-
-    if (urls.length > 10) {
-      return res.status(400).json({
-        code: 400,
-        message: "批量处理最多支持10个视频",
-        data: null,
-      });
-    }
-
-    // 检查用户是否有活跃的B站账号
-    const bilibiliAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
-    if (!bilibiliAccount) {
-      return res.status(400).json({
-        code: 400,
-        message: "请先登录B站账号",
-        data: null
-      });
-    }
-
-    console.log(`▶️ 开始批量处理 ${urls.length} 个视频`);
-    const results = await videoUtils.batchProcessVideos({
-      urls,
-      userId,
-      cookieString: bilibiliAccount.cookie_string,
-      quality,
-      downloadMode,
-      bilibiliAccountId: bilibiliAccount.id
-    });
-    console.log(`✅ 批量处理完成，成功: ${results.success.length}, 失败: ${results.failed.length}`);
-    
-    res.status(200).json({
-      code: 200,
-      message: `批量处理完成，成功: ${results.success.length}, 失败: ${results.failed.length}`,
-      data: results,
-    });
-  } catch (error) {
-    console.error(`❌ 批量处理视频失败:`, error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "批量处理视频失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {delete} /api/video/:id
- * @description 删除视频记录和文件
- * @access Protected - 需要用户登录
- */
-router.delete("/:id", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { id } = req.params;
-    const { deleteFile = false } = req.query;
-    
-    await videoUtils.deleteVideo(id, userId, deleteFile === 'true');
-    
-    res.status(200).json({
-      code: 200,
-      message: "视频删除成功",
-      data: null,
-    });
-  } catch (error) {
-    console.error(`❌ 删除视频失败:`, error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "删除视频失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {post} /api/video/generate-download-link
- * @description 生成安全下载链接
- * @access Protected - 需要用户登录
- */
-router.post("/generate-download-link", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const { fileName } = req.body;
-    const userId = req.user.uid || req.user.id;
-    
-    if (!fileName) {
-      return res.status(400).json({
-        code: 400,
-        message: "文件名不能为空",
-        data: null,
-      });
-    }
-    
-    // 检查用户是否有权限下载该文件
-    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
-    if (!hasPermission) {
-      return res.status(403).json({
-        code: 403,
-        message: "无权限下载该文件",
-        data: null,
-      });
-    }
-    
-    // 生成安全下载链接
-    const downloadInfo = videoUtils.generateSecureDownloadLink(fileName, userId);
-    
-    res.status(200).json({
-      code: 200,
-      message: "下载链接生成成功",
-      data: downloadInfo,
-    });
-  } catch (error) {
-    console.error("生成下载链接失败:", error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "生成下载链接失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {get} /api/video/secure-download
- * @description 安全文件下载（支持断点续传）
- * @access Public - 通过token验证
- */
-router.get("/secure-download", async (req, res) => {
-  try {
-    const { token, file } = req.query;
-    
-    if (!token || !file) {
-      return res.status(400).json({
-        code: 400,
-        message: "缺少必要参数",
-        data: null,
-      });
-    }
-    
-    // 验证token
-    const payload = videoUtils.verifyDownloadToken(token);
-    if (!payload) {
-      return res.status(401).json({
-        code: 401,
-        message: "下载链接已过期或无效",
-        data: null,
-      });
-    }
-    
-    // 验证文件名是否匹配
-    if (payload.fileName !== file) {
-      return res.status(403).json({
-        code: 403,
-        message: "文件访问权限验证失败",
-        data: null,
-      });
-    }
-    
-    // 再次检查用户权限
-    const hasPermission = await videoUtils.checkDownloadPermission(file, payload.userId);
-    if (!hasPermission) {
-      return res.status(403).json({
-        code: 403,
-        message: "无权限下载该文件",
-        data: null,
-      });
-    }
-    
-    // 处理安全下载
-    await videoUtils.handleSecureDownload(file, req, res);
-    
-  } catch (error) {
-    console.error("安全下载失败:", error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        code: 500,
-        message: error.message || "下载失败",
-        data: null,
-      });
-    }
-  }
-});
-
-/**
- * @api {get} /api/video/download/:bvid
- * @description 直接下载视频（兼容旧版本）
- * @access Protected - 需要用户登录
- */
-router.get("/download/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const { bvid } = req.params;
-    const userId = req.user.uid || req.user.id;
-    
-    // 构造文件名
-    const fileName = `${bvid}.mp4`;
-    
-    // 检查用户是否有权限下载该文件
-    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
-    if (!hasPermission) {
-      return res.status(403).json({
-        code: 403,
-        message: "无权限下载该文件，请先添加下载权限",
-        data: null,
-      });
-    }
-    
-    // 处理安全下载
-    await videoUtils.handleSecureDownload(fileName, req, res);
-    
-  } catch (error) {
-    console.error("直接下载失败:", error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        code: 500,
-        message: error.message || "下载失败",
-        data: null,
-      });
-    }
-  }
-});
-
-/**
- * @api {get} /api/video/available
- * @description 获取所有可下载的视频列表（公开接口）
- * @access Public
- */
-router.get("/available", async (req, res) => {
-  try {
-    const { limit = 20, offset = 0 } = req.query;
-    // 确保参数是有效的数字，避免传递NaN
-    const parsedLimit = parseInt(limit);
-    const parsedOffset = parseInt(offset);
-    const validLimit = Math.max(1, Math.min(100, isNaN(parsedLimit) ? 20 : parsedLimit));
-    const validOffset = Math.max(0, isNaN(parsedOffset) ? 0 : parsedOffset);
-    
-    const result = await videoUtils.getAvailableVideos(
-      validLimit, 
-      validOffset
-    );
-    
-    res.status(200).json({
-      code: 200,
-      message: "成功获取可下载视频列表",
-      data: result,
-    });
-  } catch (error) {
-    console.error("获取可下载视频列表失败:", error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "获取视频列表失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {post} /api/video/add-download-permission
- * @description 添加视频下载权限
- * @access Protected - 需要用户登录
- * @body { "bvid": "视频BVID" }
- */
-router.post("/add-download-permission", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { bvid } = req.body;
-    
-    if (!bvid || !bvid.trim()) {
-      return res.status(400).json({
-        code: 400,
-        message: "请提供有效的视频BVID",
-        data: null,
-      });
-    }
-    
-    const result = await videoUtils.addVideoDownloader(userId, bvid.trim());
-    
-    res.status(200).json({
-      code: 200,
-      message: result.message,
-      data: result,
-    });
-  } catch (error) {
-    console.error("添加下载权限失败:", error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "添加下载权限失败",
-      data: null,
-    });
-  }
-});
-
-/**
- * @api {get} /api/video/my-permissions/:bvid
- * @description 查看用户对特定视频的权限
- * @access Protected - 需要用户登录
- */
-router.get("/my-permissions/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
-  try {
-    const userId = req.user.uid || req.user.id;
-    const { bvid } = req.params;
-    
-    // 检查用户对该视频的权限
-    const fileName = `${bvid}.mp4`;
-    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
-    
-    if (hasPermission) {
-      // 获取具体的关系类型
-      const db = require("../../config/db").promise();
-      const [relations] = await db.execute(
-        `SELECT uv.relation_type, uv.created_at, v.title 
-         FROM user_videos uv 
-         INNER JOIN videos v ON uv.video_id = v.id 
-         WHERE uv.user_id = ? AND v.bvid = ?`,
-        [userId, bvid]
-      );
-      
-      if (relations.length > 0) {
-        const relation = relations[0];
-        res.status(200).json({
-          code: 200,
-          message: "有权限访问该视频",
-          data: {
-            hasPermission: true,
-            relationType: relation.relation_type,
-            relationDesc: videoUtils.getRelationTypeDesc ? videoUtils.getRelationTypeDesc(relation.relation_type) : relation.relation_type,
-            addedAt: relation.created_at,
-            videoTitle: relation.title
-          },
-        });
-      } else {
-        res.status(200).json({
-          code: 200,
-          message: "无权限访问该视频",
-          data: { hasPermission: false },
-        });
-      }
-    } else {
-      res.status(200).json({
-        code: 200,
-        message: "无权限访问该视频",
-        data: { hasPermission: false },
-      });
-    }
-  } catch (error) {
-    console.error("查询权限失败:", error);
-    res.status(500).json({
-      code: 500,
-      message: error.message || "查询权限失败",
-      data: null,
-    });
-  }
-});
-
-module.exports = router;
