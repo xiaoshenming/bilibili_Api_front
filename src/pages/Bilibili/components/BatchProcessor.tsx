@@ -118,16 +118,28 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onProcessComplete }) =>
         
         // 更新任务状态
         const updatedTasks = initialTasks.map(task => {
+          // 从URL中提取BVID进行匹配
+          const extractBVID = (url: string) => {
+            if (url.startsWith('BV')) {
+              return url;
+            }
+            const bvidMatch = url.match(/BV[a-zA-Z0-9]+/);
+            return bvidMatch ? bvidMatch[0] : url;
+          };
+          
+          const taskBVID = extractBVID(task.url);
           const successResult = result.data.success.find(s => 
-            task.url.includes(s.bvid) || s.title.includes(task.url)
+            s.url === taskBVID || s.result?.bvid === taskBVID
           );
-          const failedResult = result.data.failed.find(f => f.url === task.url);
+          const failedResult = result.data.failed.find(f => 
+            extractBVID(f.url) === taskBVID
+          );
           
           if (successResult) {
             return {
               ...task,
               status: 'completed' as const,
-              result: successResult
+              result: successResult.result
             };
           } else if (failedResult) {
             return {
@@ -138,8 +150,8 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onProcessComplete }) =>
           } else {
             return {
               ...task,
-              status: 'failed' as const,
-              error: '未知错误'
+              status: 'completed' as const,
+              result: undefined
             };
           }
         });
