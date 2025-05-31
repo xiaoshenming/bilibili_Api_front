@@ -231,10 +231,11 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onProcessComplete }) =>
         <div style={{ marginBottom: 16 }}>
           <Title level={4} style={{ margin: 0 }}>
             <CloudDownloadOutlined style={{ marginRight: 8 }} />
-            批量视频处理
+            批量解析处理
+            <Tag color="green" style={{ marginLeft: 8 }}>多线程模式</Tag>
           </Title>
           <Text type="secondary">
-            一次性处理多个B站视频，支持批量下载和入库
+            多线程并发处理多个B站视频，高效批量解析和下载，适合大量视频处理
           </Text>
         </div>
 
@@ -289,7 +290,7 @@ BV1zz411c7mF`}
           />
           <div style={{ marginTop: 8, color: '#666' }}>
             <Text type="secondary">
-              支持完整链接或BV号，最多50个视频
+              支持完整链接或BV号，多线程并发处理，最多50个视频
             </Text>
           </div>
         </div>

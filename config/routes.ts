@@ -64,10 +64,10 @@ export default [
     component: './VideoPlayer',
   },
   {
-    name: 'parse-manager',
+    name: 'available-videos',
     icon: 'cloud-download',
-    path: '/parse-manager',
-    component: './ParseManager',
+    path: '/available-videos',
+    component: './AvailableVideos',
   },
   {
     path: '/',

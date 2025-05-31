@@ -522,7 +522,15 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
       <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 24 }}>
         <TabPane tab="单个解析" key="single">
           {/* 输入区域 */}
-          <Card title="视频解析" style={{ marginBottom: 24 }}>
+          <Card 
+            title={
+              <Space>
+                <span>单视频解析</span>
+                <Tag color="blue">单线程模式</Tag>
+              </Space>
+            } 
+            style={{ marginBottom: 24 }}
+          >
             <Space.Compact style={{ width: '100%' }}>
               <Input
                 placeholder="请输入B站视频链接或BV号，例如：https://www.bilibili.com/video/BV1xx411c7mD 或 BV1xx411c7mD"
@@ -545,7 +553,7 @@ const VideoParser: React.FC<VideoParserProps> = ({ accounts }) => {
             
             <div style={{ marginTop: 16 }}>
               <Text type="secondary">
-                支持格式：完整链接、BV号。解析后可获取视频详细信息和下载链接。
+                支持格式：完整链接、BV号。单线程模式，逐个解析视频，适合精确处理单个视频。
               </Text>
             </div>
           </Card>

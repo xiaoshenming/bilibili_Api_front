@@ -4,7 +4,6 @@ import { Card, Tabs, message } from 'antd';
 import { 
   VideoCameraOutlined, 
   QrcodeOutlined, 
-  DatabaseOutlined,
   CloudDownloadOutlined,
   FolderOpenOutlined,
   AppstoreOutlined
@@ -13,7 +12,7 @@ import { useModel, request } from '@umijs/max';
 import BilibiliLogin from './components/BilibiliLogin';
 import VideoParser from './components/VideoParser';
 import AccountManager from './components/AccountManager';
-import AvailableVideos from './components/AvailableVideos';
+
 import BatchProcessor from './components/BatchProcessor';
 import VideoManager from './components/videomanager';
 
@@ -79,7 +78,7 @@ const BilibiliPage: React.FC = () => {
       label: (
         <span>
           <VideoCameraOutlined />
-          视频解析
+          单视频解析
         </span>
       ),
       children: (
@@ -89,28 +88,11 @@ const BilibiliPage: React.FC = () => {
       ),
     },
     {
-      key: 'available',
-      label: (
-        <span>
-          <DatabaseOutlined />
-          可下载视频库
-        </span>
-      ),
-      children: (
-        <AvailableVideos 
-          onRequestPermission={(video) => {
-            message.success(`已申请 ${video.title} 的下载权限`);
-            // 可以在这里添加其他逻辑，比如刷新用户视频列表
-          }}
-        />
-      ),
-    },
-    {
       key: 'batch',
       label: (
         <span>
           <CloudDownloadOutlined />
-          批量处理
+          批量解析处理
         </span>
       ),
       children: (
