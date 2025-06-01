@@ -247,15 +247,15 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
       render: (_, record) => (
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <Image
-            src={getSafeImageUrl(record.thumbnail_url)}
+            src={getSafeImageUrl(record.pic)}
             alt={record.title}
             width={80}
             height={60}
             style={{ borderRadius: 4, marginRight: 12 }}
             placeholder={<div style={{ width: 80, height: 60, backgroundColor: '#f5f5f5', borderRadius: 4 }} />}
             onError={(e) => {
-              console.log('图片加载失败:', record.thumbnail_url);
-              console.log('代理URL:', getSafeImageUrl(record.thumbnail_url));
+              console.log('图片加载失败:', record.pic);
+              console.log('代理URL:', getSafeImageUrl(record.pic));
             }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -275,24 +275,24 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
     },
     {
       title: 'UP主',
-      dataIndex: 'author',
-      key: 'author',
+      dataIndex: 'name',
+      key: 'name',
       width: 120,
-      render: (author, record) => (
+      render: (name, record) => (
         <Space>
           <Image
-            src={getSafeImageUrl(record.author_face)}
-            alt={author}
+            src={getSafeImageUrl(record.face)}
+            alt={name}
             width={24}
             height={24}
             style={{ borderRadius: '50%' }}
             placeholder={<div style={{ width: 24, height: 24, backgroundColor: '#f5f5f5', borderRadius: '50%' }} />}
             onError={(e) => {
-              console.log('图片加载失败:', record.author_face);
-              console.log('代理URL:', getSafeImageUrl(record.author_face));
+              console.log('图片加载失败:', record.face);
+              console.log('代理URL:', getSafeImageUrl(record.face));
             }}
           />
-          <Text>{author}</Text>
+          <Text>{name}</Text>
         </Space>
       ),
     },
@@ -304,15 +304,15 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
         <Space direction="vertical" size={2}>
           <Space size={8}>
             <EyeOutlined style={{ color: '#1890ff' }} />
-            <Text style={{ fontSize: 12 }}>{formatNumber(record.view_count)}</Text>
+            <Text style={{ fontSize: 12 }}>{formatNumber(record.view)}</Text>
             <LikeOutlined style={{ color: '#f5222d' }} />
-            <Text style={{ fontSize: 12 }}>{formatNumber(record.like_count)}</Text>
+            <Text style={{ fontSize: 12 }}>{formatNumber(record.like)}</Text>
           </Space>
           <Space size={8}>
             <HeartOutlined style={{ color: '#fa8c16' }} />
-            <Text style={{ fontSize: 12 }}>{formatNumber(record.favorite_count)}</Text>
+            <Text style={{ fontSize: 12 }}>{formatNumber(record.favorite)}</Text>
             <ShareAltOutlined style={{ color: '#52c41a' }} />
-            <Text style={{ fontSize: 12 }}>{formatNumber(record.share_count)}</Text>
+            <Text style={{ fontSize: 12 }}>{formatNumber(record.share)}</Text>
           </Space>
         </Space>
       ),
@@ -554,12 +554,12 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
             <Row gutter={24}>
               <Col span={8}>
                 <Image
-                  src={getSafeImageUrl(selectedVideo.thumbnail_url)}
+                  src={getSafeImageUrl(selectedVideo.pic)}
                   alt={selectedVideo.title}
                   style={{ width: '100%', borderRadius: 8 }}
                   onError={(e) => {
-                    console.log('图片加载失败:', selectedVideo.thumbnail_url);
-                    console.log('代理URL:', getSafeImageUrl(selectedVideo.thumbnail_url));
+                    console.log('图片加载失败:', selectedVideo.pic);
+                    console.log('代理URL:', getSafeImageUrl(selectedVideo.pic));
                   }}
                 />
               </Col>
@@ -580,21 +580,21 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
                   </div>
 
                   <Descriptions column={2} size="small">
-                    <Descriptions.Item label="UP主">{selectedVideo.author}</Descriptions.Item>
+                    <Descriptions.Item label="UP主">{selectedVideo.name}</Descriptions.Item>
                     <Descriptions.Item label="发布时间">
-                      {dayjs(selectedVideo.publish_time).format('YYYY-MM-DD')}
+                      {dayjs.unix(selectedVideo.pubdate).format('YYYY-MM-DD')}
                     </Descriptions.Item>
                     <Descriptions.Item label="播放量">
-                      {formatNumber(selectedVideo.view_count)}
+                      {formatNumber(selectedVideo.view)}
                     </Descriptions.Item>
                     <Descriptions.Item label="点赞数">
-                      {formatNumber(selectedVideo.like_count)}
+                      {formatNumber(selectedVideo.like)}
                     </Descriptions.Item>
                     <Descriptions.Item label="收藏数">
-                      {formatNumber(selectedVideo.favorite_count)}
+                      {formatNumber(selectedVideo.favorite)}
                     </Descriptions.Item>
                     <Descriptions.Item label="分享数">
-                      {formatNumber(selectedVideo.share_count)}
+                      {formatNumber(selectedVideo.share)}
                     </Descriptions.Item>
                     <Descriptions.Item label="文件大小">
                       {formatFileSize(selectedVideo.file_size)}
@@ -604,7 +604,7 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
                     </Descriptions.Item>
                   </Descriptions>
 
-                  {selectedVideo.description && (
+                  {selectedVideo.desc && (
                     <div>
                       <Text strong>视频简介：</Text>
                       <div style={{ 
@@ -615,7 +615,7 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
                         maxHeight: 150,
                         overflow: 'auto'
                       }}>
-                        <Text>{selectedVideo.description}</Text>
+                        <Text>{selectedVideo.desc}</Text>
                       </div>
                     </div>
                   )}
