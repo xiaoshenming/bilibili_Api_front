@@ -644,14 +644,12 @@ const VideoPlayer: React.FC = () => {
                   <Descriptions.Item label="AID">{selectedVideo.aid}</Descriptions.Item>
                   <Descriptions.Item label="作者">
                     <Space>
-                      <Avatar src={selectedVideo.face} size="small" />
+                      <Avatar src={getSafeImageUrl(selectedVideo.face)} size="small" />
                       {selectedVideo.name}
                     </Space>
                   </Descriptions.Item>
                   <Descriptions.Item label="时长">{formatDuration(selectedVideo.duration)}</Descriptions.Item>
                   <Descriptions.Item label="画质">{getQualityTag(selectedVideo.quality)}</Descriptions.Item>
-                  <Descriptions.Item label="文件大小">{formatFileSize(selectedVideo.file_size)}</Descriptions.Item>
-                  <Descriptions.Item label="状态">{getStatusTag(selectedVideo.download_status)}</Descriptions.Item>
                 </Descriptions>
               </Col>
             </Row>
@@ -672,8 +670,6 @@ const VideoPlayer: React.FC = () => {
                 <Title level={5}>时间信息</Title>
                 <Space direction="vertical" style={{ width: '100%' }}>
                   <div><CalendarOutlined /> 发布时间: {selectedVideo.pubdate ? dayjs(selectedVideo.pubdate * 1000).format('YYYY-MM-DD HH:mm') : '-'}</div>
-                  <div><CalendarOutlined /> 解析时间: {selectedVideo.created_at ? dayjs(selectedVideo.created_at).format('YYYY-MM-DD HH:mm') : '-'}</div>
-                  <div><CalendarOutlined /> 更新时间: {selectedVideo.updated_at ? dayjs(selectedVideo.updated_at).format('YYYY-MM-DD HH:mm') : '-'}</div>
                 </Space>
               </Col>
             </Row>
