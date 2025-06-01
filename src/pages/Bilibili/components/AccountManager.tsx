@@ -47,6 +47,7 @@ import {
 } from '@ant-design/icons';
 import { request } from '@umijs/max';
 import dayjs from 'dayjs';
+import { getSafeImageUrl } from '@/utils/imageProxy';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -534,7 +535,7 @@ const AccountManager: React.FC<AccountManagerProps> = ({ accounts, onAccountChan
                         >
                           <Avatar 
                             size={64} 
-                            src={account.avatar} 
+                            src={getSafeImageUrl(account.avatar)} 
                             icon={<UserOutlined />}
                           />
                         </Badge>

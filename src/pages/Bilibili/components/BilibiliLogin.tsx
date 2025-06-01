@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useModel, request } from '@umijs/max';
 import dayjs from 'dayjs';
+import { getSafeImageUrl } from '@/utils/imageProxy';
 
 const { Title, Text } = Typography;
 const { Step } = Steps;
@@ -328,7 +329,7 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
               <Col xs={24} sm={12} md={8} lg={6} key={account.id}>
                 <Card size="small" hoverable>
                   <Space direction="vertical" align="center" style={{ width: '100%' }}>
-                    <Avatar src={account.avatar} size={48}>
+                    <Avatar src={getSafeImageUrl(account.avatar)} size={48}>
                       {account.nickname?.[0]}
                     </Avatar>
                     <Text strong>{account.nickname}</Text>
