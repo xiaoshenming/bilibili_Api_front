@@ -187,9 +187,15 @@ const AvailableVideos: React.FC<AvailableVideosProps> = ({ onRequestPermission }
     }
     
     if (permission.hasPermission) {
+      const relationTypeMap = {
+        'owner': 'UP主',
+        'processor': '处理者', 
+        'downloader': '下载者'
+      };
+      const relationText = relationTypeMap[permission.relationType as keyof typeof relationTypeMap] || permission.relationDesc || '已授权';
       return { 
         status: 'granted', 
-        text: permission.relationDesc || '已授权', 
+        text: relationText, 
         color: 'success' 
       };
     }
@@ -226,7 +232,7 @@ const AvailableVideos: React.FC<AvailableVideosProps> = ({ onRequestPermission }
               <Space size={4}>
                 <UserOutlined style={{ fontSize: 12, color: '#666' }} />
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  {record.owner_name}
+                  {record.name}
                 </Text>
               </Space>
             </div>
@@ -235,19 +241,19 @@ const AvailableVideos: React.FC<AvailableVideosProps> = ({ onRequestPermission }
                 <Space size={4}>
                   <EyeOutlined style={{ fontSize: 12, color: '#666' }} />
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {formatNumber(record.view_count)}
+                    {formatNumber(parseInt(record.view))}
                   </Text>
                 </Space>
                 <Space size={4}>
                   <LikeOutlined style={{ fontSize: 12, color: '#666' }} />
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {formatNumber(record.like_count)}
+                    {formatNumber(parseInt(record.like))}
                   </Text>
                 </Space>
                 <Space size={4}>
                   <ClockCircleOutlined style={{ fontSize: 12, color: '#666' }} />
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {formatDuration(record.duration)}
+                    {formatDuration(parseInt(record.duration))}
                   </Text>
                 </Space>
               </Space>
@@ -341,7 +347,7 @@ const AvailableVideos: React.FC<AvailableVideosProps> = ({ onRequestPermission }
   const filteredVideos = videos.filter(video => {
     const matchesSearch = !searchText || 
       video.title.toLowerCase().includes(searchText.toLowerCase()) ||
-      video.owner_name.toLowerCase().includes(searchText.toLowerCase());
+      video.name.toLowerCase().includes(searchText.toLowerCase());
     
     const matchesCategory = categoryFilter === 'all' || video.tname === categoryFilter;
     
@@ -500,7 +506,7 @@ const AvailableVideos: React.FC<AvailableVideosProps> = ({ onRequestPermission }
               <Image
                 width={400}
                 height={225}
-                src={selectedVideo.pic}
+                src={getSafeImageUrl(selectedVideo.pic)}
                 alt={selectedVideo.title}
                 style={{ borderRadius: 8 }}
               />
@@ -521,17 +527,17 @@ const AvailableVideos: React.FC<AvailableVideosProps> = ({ onRequestPermission }
                   <Image
                     width={24}
                     height={24}
-                    src={selectedVideo.owner_face}
+                    src={getSafeImageUrl(selectedVideo.face)}
                     style={{ borderRadius: '50%' }}
                   />
-                  {selectedVideo.owner_name}
+                  {selectedVideo.name}
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="分类">
                 <Tag color="blue">{selectedVideo.tname}</Tag>
               </Descriptions.Item>
               <Descriptions.Item label="时长">
-                {formatDuration(selectedVideo.duration)}
+                {formatDuration(parseInt(selectedVideo.duration))}
               </Descriptions.Item>
               <Descriptions.Item label="发布时间">
                 {formatDate(selectedVideo.pubdate)}
@@ -539,25 +545,25 @@ const AvailableVideos: React.FC<AvailableVideosProps> = ({ onRequestPermission }
               <Descriptions.Item label="播放量">
                 <Space>
                   <EyeOutlined />
-                  {formatNumber(selectedVideo.view_count)}
+                  {formatNumber(parseInt(selectedVideo.view))}
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="点赞数">
                 <Space>
                   <LikeOutlined />
-                  {formatNumber(selectedVideo.like_count)}
+                  {formatNumber(parseInt(selectedVideo.like))}
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="投币数">
                 <Space>
                   <HeartOutlined />
-                  {formatNumber(selectedVideo.coin_count)}
+                  {formatNumber(parseInt(selectedVideo.coin))}
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="分享数">
                 <Space>
                   <ShareAltOutlined />
-                  {formatNumber(selectedVideo.share_count)}
+                  {formatNumber(parseInt(selectedVideo.share))}
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="权限状态" span={2}>
