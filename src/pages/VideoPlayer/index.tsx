@@ -113,8 +113,6 @@ const VideoPlayer: React.FC = () => {
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [statistics, setStatistics] = useState({
     total: 0,
-    completed: 0,
-    totalSize: 0,
     totalDuration: 0
   });
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -149,8 +147,6 @@ const VideoPlayer: React.FC = () => {
         // 计算统计信息
         const stats = {
           total: videoList.length,
-          completed: videoList.filter((v: VideoRecord) => v.download_status === 'completed').length,
-          totalSize: videoList.reduce((sum: number, v: VideoRecord) => sum + (v.file_size || 0), 0),
           totalDuration: videoList.reduce((sum: number, v: VideoRecord) => sum + (parseInt(v.duration) || 0), 0)
         };
         setStatistics(stats);
@@ -308,7 +304,7 @@ const VideoPlayer: React.FC = () => {
       video.name.toLowerCase().includes(searchText.toLowerCase()) ||
       video.bvid.toLowerCase().includes(searchText.toLowerCase());
     
-    const matchesStatus = statusFilter === 'all' || video.download_status === statusFilter;
+    const matchesStatus = true; // 移除状态筛选，因为显示的都是可用视频
     const matchesQuality = qualityFilter === 'all' || video.quality.toString() === qualityFilter;
     
     const matchesDate = !dateRange || !video.pubdate || (
@@ -345,7 +341,12 @@ const VideoPlayer: React.FC = () => {
             </div>
             <div style={{ color: '#666', fontSize: 12 }}>
               <Space size={16}>
-                <span><UserOutlined /> {record.name}</span>
+                <span>
+                  <Avatar src={getSafeImageUrl(record.face)} size={16} style={{ marginRight: 4 }}>
+                    {record.name?.[0]}
+                  </Avatar>
+                  {record.name}
+                </span>
                 <span><VideoCameraOutlined /> {record.bvid}</span>
                 <span><ClockCircleOutlined /> {formatDuration(record.duration)}</span>
               </Space>
@@ -381,11 +382,15 @@ const VideoPlayer: React.FC = () => {
       render: (duration) => duration ? formatDuration(duration) : '-',
     },
     {
-      title: '状态',
-      dataIndex: 'download_status',
-      key: 'download_status',
-      width: 100,
-      render: (status) => getStatusTag(status),
+      title: '简介',
+      dataIndex: 'desc',
+      key: 'desc',
+      width: 200,
+      render: (desc) => (
+        <div style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {desc && desc !== '-' ? desc : '暂无简介'}
+        </div>
+      ),
     },
     {
       title: '发布时间',
@@ -471,7 +476,7 @@ const VideoPlayer: React.FC = () => {
     >
       {/* 统计卡片 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
+        <Col span={12}>
           <Card>
             <Statistic
               title="总视频数"
@@ -480,26 +485,7 @@ const VideoPlayer: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic
-              title="已完成"
-              value={statistics.completed}
-              prefix={<PlayCircleOutlined />}
-              valueStyle={{ color: '#3f8600' }}
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic
-              title="总大小"
-              value={formatFileSize(statistics.totalSize)}
-              prefix={<CloudDownloadOutlined />}
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
+        <Col span={12}>
           <Card>
             <Statistic
               title="总时长"
@@ -513,7 +499,7 @@ const VideoPlayer: React.FC = () => {
       {/* 筛选工具栏 */}
       <Card style={{ marginBottom: 16 }}>
         <Row gutter={16} align="middle">
-          <Col span={8}>
+          <Col span={10}>
             <Search
               placeholder="搜索视频标题、作者或BVID"
               value={searchText}
@@ -521,21 +507,7 @@ const VideoPlayer: React.FC = () => {
               allowClear
             />
           </Col>
-          <Col span={4}>
-            <Select
-              placeholder="状态筛选"
-              value={statusFilter}
-              onChange={setStatusFilter}
-              style={{ width: '100%' }}
-            >
-              <Option value="all">全部状态</Option>
-              <Option value="completed">已完成</Option>
-              <Option value="downloading">下载中</Option>
-              <Option value="pending">等待中</Option>
-              <Option value="failed">失败</Option>
-            </Select>
-          </Col>
-          <Col span={4}>
+          <Col span={6}>
             <Select
               placeholder="画质筛选"
               value={qualityFilter}
