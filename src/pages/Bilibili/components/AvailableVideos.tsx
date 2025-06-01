@@ -40,6 +40,7 @@ import {
 import { getAvailableVideos, addDownloadPermission, getVideoPermission } from '@/services/ant-design-pro/api';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import { getSafeImageUrl } from '../../../utils/imageProxy';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
@@ -206,10 +207,14 @@ const AvailableVideos: React.FC<AvailableVideosProps> = ({ onRequestPermission }
           <Image
             width={120}
             height={68}
-            src={record.pic}
+            src={getSafeImageUrl(record.pic)}
             alt={record.title}
             style={{ borderRadius: 4, objectFit: 'cover' }}
             fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG4W+FgYxN"
+            onError={(e) => {
+              console.log('图片加载失败:', record.pic);
+              console.log('代理URL:', getSafeImageUrl(record.pic));
+            }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ marginBottom: 4 }}>

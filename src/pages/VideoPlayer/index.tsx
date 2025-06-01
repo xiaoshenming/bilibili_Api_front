@@ -51,6 +51,7 @@ import {
 } from '@ant-design/icons';
 import { request, useModel } from '@umijs/max';
 import dayjs from 'dayjs';
+import { getSafeImageUrl } from '@/utils/imageProxy';
 import './index.less';
 
 const { Title, Text, Paragraph } = Typography;
@@ -327,12 +328,16 @@ const VideoPlayer: React.FC = () => {
       render: (_, record) => (
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <Image
-            src={record.pic}
+            src={getSafeImageUrl(record.pic)}
             alt={record.title}
             width={80}
             height={60}
             style={{ borderRadius: 4, marginRight: 12, objectFit: 'cover' }}
             fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG4W+FgYxN"
+            onError={(e) => {
+              console.log('图片加载失败:', record.pic);
+              console.log('代理URL:', getSafeImageUrl(record.pic));
+            }}
           />
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 14 }}>
@@ -650,10 +655,14 @@ const VideoPlayer: React.FC = () => {
             <Row gutter={16}>
               <Col span={8}>
                 <Image
-                  src={selectedVideo.pic}
+                  src={getSafeImageUrl(selectedVideo.pic)}
                   alt={selectedVideo.title}
                   width="100%"
                   style={{ borderRadius: 8 }}
+                  onError={(e) => {
+                    console.log('图片加载失败:', selectedVideo.pic);
+                    console.log('代理URL:', getSafeImageUrl(selectedVideo.pic));
+                  }}
                 />
               </Col>
               <Col span={16}>

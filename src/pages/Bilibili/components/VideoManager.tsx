@@ -37,6 +37,7 @@ import {
 import { request } from '@umijs/max';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import { getSafeImageUrl } from '../../../utils/imageProxy';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
@@ -246,12 +247,16 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
       render: (_, record) => (
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <Image
-            src={record.thumbnail_url}
+            src={getSafeImageUrl(record.thumbnail_url)}
             alt={record.title}
             width={80}
             height={60}
             style={{ borderRadius: 4, marginRight: 12 }}
             placeholder={<div style={{ width: 80, height: 60, backgroundColor: '#f5f5f5', borderRadius: 4 }} />}
+            onError={(e) => {
+              console.log('图片加载失败:', record.thumbnail_url);
+              console.log('代理URL:', getSafeImageUrl(record.thumbnail_url));
+            }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
             <Tooltip title={record.title}>
@@ -276,12 +281,16 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
       render: (author, record) => (
         <Space>
           <Image
-            src={record.author_face}
+            src={getSafeImageUrl(record.author_face)}
             alt={author}
             width={24}
             height={24}
             style={{ borderRadius: '50%' }}
             placeholder={<div style={{ width: 24, height: 24, backgroundColor: '#f5f5f5', borderRadius: '50%' }} />}
+            onError={(e) => {
+              console.log('图片加载失败:', record.author_face);
+              console.log('代理URL:', getSafeImageUrl(record.author_face));
+            }}
           />
           <Text>{author}</Text>
         </Space>
@@ -545,9 +554,13 @@ const VideoManager: React.FC<VideoManagerProps> = ({ accounts }) => {
             <Row gutter={24}>
               <Col span={8}>
                 <Image
-                  src={selectedVideo.thumbnail_url}
+                  src={getSafeImageUrl(selectedVideo.thumbnail_url)}
                   alt={selectedVideo.title}
                   style={{ width: '100%', borderRadius: 8 }}
+                  onError={(e) => {
+                    console.log('图片加载失败:', selectedVideo.thumbnail_url);
+                    console.log('代理URL:', getSafeImageUrl(selectedVideo.thumbnail_url));
+                  }}
                 />
               </Col>
               <Col span={16}>
