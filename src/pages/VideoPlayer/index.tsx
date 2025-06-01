@@ -151,7 +151,7 @@ const VideoPlayer: React.FC = () => {
           total: videoList.length,
           completed: videoList.filter((v: VideoRecord) => v.download_status === 'completed').length,
           totalSize: videoList.reduce((sum: number, v: VideoRecord) => sum + (v.file_size || 0), 0),
-          totalDuration: videoList.reduce((sum: number, v: VideoRecord) => sum + (v.duration || 0), 0)
+          totalDuration: videoList.reduce((sum: number, v: VideoRecord) => sum + (parseInt(v.duration) || 0), 0)
         };
         setStatistics(stats);
       }
