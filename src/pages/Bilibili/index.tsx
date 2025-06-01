@@ -16,7 +16,7 @@ import AccountManager from './components/AccountManager';
 import BatchProcessor from './components/BatchProcessor';
 import VideoManager from './components/videomanager';
 
-const { TabPane } = Tabs;
+
 
 const BilibiliPage: React.FC = () => {
   const { initialState } = useModel('@@initialState');

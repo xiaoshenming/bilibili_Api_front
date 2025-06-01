@@ -21,6 +21,34 @@ export default {
       changeOrigin: true,
       ws: true,
     },
+    // 哔哩哔哩图片代理，解决防盗链问题
+    '/bilibili-img/': {
+      target: 'https://i0.hdslb.com',
+      changeOrigin: true,
+      pathRewrite: { '^/bilibili-img': '' },
+      headers: {
+        'Referer': 'https://www.bilibili.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36'
+      }
+    },
+    '/bilibili-img1/': {
+      target: 'https://i1.hdslb.com',
+      changeOrigin: true,
+      pathRewrite: { '^/bilibili-img1': '' },
+      headers: {
+        'Referer': 'https://www.bilibili.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36'
+      }
+    },
+    '/bilibili-img2/': {
+      target: 'https://i2.hdslb.com',
+      changeOrigin: true,
+      pathRewrite: { '^/bilibili-img2': '' },
+      headers: {
+        'Referer': 'https://www.bilibili.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36'
+      }
+    },
   },
   /**
    * @name 详细的代理配置

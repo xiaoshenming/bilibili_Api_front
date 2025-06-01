@@ -522,28 +522,54 @@ const BilibiliLogin: React.FC<BilibiliLoginProps> = ({ onLoginSuccess, accounts 
       
       {/* 使用说明 */}
       <Card title="使用说明" style={{ marginTop: 24 }}>
-        <Timeline>
-          <Timeline.Item color="blue" dot={<QrcodeOutlined />}>
-            <Text strong>生成二维码</Text>
-            <br />
-            <Text type="secondary">点击"生成二维码"按钮，系统将为您生成专属登录二维码</Text>
-          </Timeline.Item>
-          <Timeline.Item color="orange" dot={<MobileOutlined />}>
-            <Text strong>扫描二维码</Text>
-            <br />
-            <Text type="secondary">使用哔哩哔哩手机APP扫描屏幕上的二维码</Text>
-          </Timeline.Item>
-          <Timeline.Item color="purple" dot={<SecurityScanOutlined />}>
-            <Text strong>确认登录</Text>
-            <br />
-            <Text type="secondary">在手机APP上点击"确认登录"按钮</Text>
-          </Timeline.Item>
-          <Timeline.Item color="green" dot={<CheckCircleOutlined />}>
-            <Text strong>登录成功</Text>
-            <br />
-            <Text type="secondary">登录成功后，系统将自动跳转到账号管理页面</Text>
-          </Timeline.Item>
-        </Timeline>
+        <Timeline
+          items={[
+            {
+              color: 'blue',
+              dot: <QrcodeOutlined />,
+              children: (
+                <>
+                  <Text strong>生成二维码</Text>
+                  <br />
+                  <Text type="secondary">点击"生成二维码"按钮，系统将为您生成专属登录二维码</Text>
+                </>
+              ),
+            },
+            {
+              color: 'orange',
+              dot: <MobileOutlined />,
+              children: (
+                <>
+                  <Text strong>扫描二维码</Text>
+                  <br />
+                  <Text type="secondary">使用哔哩哔哩手机APP扫描屏幕上的二维码</Text>
+                </>
+              ),
+            },
+            {
+              color: 'purple',
+              dot: <SecurityScanOutlined />,
+              children: (
+                <>
+                  <Text strong>确认登录</Text>
+                  <br />
+                  <Text type="secondary">在手机APP上点击"确认登录"按钮</Text>
+                </>
+              ),
+            },
+            {
+              color: 'green',
+              dot: <CheckCircleOutlined />,
+              children: (
+                <>
+                  <Text strong>登录成功</Text>
+                  <br />
+                  <Text type="secondary">登录成功后，系统将自动跳转到账号管理页面</Text>
+                </>
+              ),
+            },
+          ]}
+        />
       </Card>
       
 
