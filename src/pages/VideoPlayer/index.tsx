@@ -564,13 +564,25 @@ const VideoPlayer: React.FC = () => {
       <Modal
         title={selectedVideo?.title}
         open={playerModalVisible}
-        onCancel={() => setPlayerModalVisible(false)}
+        onCancel={() => {
+          if (videoRef.current) {
+            videoRef.current.pause();
+            videoRef.current.currentTime = 0;
+          }
+          setPlayerModalVisible(false);
+        }}
         width={1000}
         footer={[
           <Button key="download" icon={<DownloadOutlined />} onClick={() => selectedVideo && handleDownloadVideo(selectedVideo)}>
             下载到本地
           </Button>,
-          <Button key="close" onClick={() => setPlayerModalVisible(false)}>
+          <Button key="close" onClick={() => {
+            if (videoRef.current) {
+              videoRef.current.pause();
+              videoRef.current.currentTime = 0;
+            }
+            setPlayerModalVisible(false);
+          }}>
             关闭
           </Button>
         ]}
