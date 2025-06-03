@@ -6,13 +6,14 @@ import {
   QrcodeOutlined, 
   CloudDownloadOutlined,
   FolderOpenOutlined,
-  AppstoreOutlined
+  AppstoreOutlined,
+  PlayCircleOutlined
 } from '@ant-design/icons';
 import { useModel, request } from '@umijs/max';
 import BilibiliLogin from './components/BilibiliLogin';
 import VideoParser from './components/VideoParser';
 import AccountManager from './components/AccountManager';
-
+import OnlinePlayer from './components/OnlinePlayer';
 import BatchProcessor from './components/BatchProcessor';
 import VideoManager from './components/videomanager';
 
@@ -85,6 +86,18 @@ const BilibiliPage: React.FC = () => {
         <VideoParser 
           accounts={bilibiliAccounts}
         />
+      ),
+    },
+    {
+      key: 'player',
+      label: (
+        <span>
+          <PlayCircleOutlined />
+          在线播放
+        </span>
+      ),
+      children: (
+        <OnlinePlayer />
       ),
     },
     {
